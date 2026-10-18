@@ -1,0 +1,418 @@
+DefenderTray — Licencia de software propietario
+DefenderTray — Proprietary Software License
+
+Copyright (c) 2026 yhquintero / Ing. Yosvany Hernández Quintero
+(https://github.com/yhquintero).
+Todos los derechos reservados. All rights reserved.
+
+Este documento está redactado en español y en inglés. En caso de
+divergencia, prevalece la versión en español.
+This document is written in Spanish and English. In case of divergence,
+the Spanish version prevails.
+
+English version below / Versión en inglés más abajo.
+
+
+======================================================================
+ESPAÑOL
+======================================================================
+
+1. Titularidad
+
+DefenderTray —incluidos su código fuente, los scripts PowerShell de
+todas las versiones depositadas en este repositorio, su interfaz
+gráfica, las plantillas embebidas (MSI, Docker, PWA, paneles HTML), los
+iconos, los textos, la documentación (README.md, CONTRIBUTING.md,
+SECURITY.md y este documento) y el nombre y la marca «DefenderTray»—
+(en adelante, el «Software») es propiedad de yhquintero (en adelante,
+el «Titular») y está protegido por la legislación de propiedad
+intelectual y por los tratados internacionales aplicables.
+
+2. Código visible, no código abierto
+
+Que este repositorio sea público y el código sea legible no convierte el
+Software en software libre ni de código abierto. No se concede ninguna
+licencia ni ningún derecho, expreso o implícito, salvo los indicados
+expresamente en este documento.
+
+3. Usos permitidos sin autorización
+
+Sin necesidad de autorización del Titular se permite:
+
+  a) ver, estudiar y descargar el código fuente;
+
+  b) bifurcar (fork) el repositorio dentro de GitHub, en la medida en que
+     lo permitan los Términos de Servicio de GitHub, con el único fin de
+     leer el código o de proponer contribuciones al repositorio original
+     mediante pull requests;
+
+  c) usar el Software en equipos de tu propiedad o sobre los que tengas
+     autorización explícita para administrarlos, con fines personales,
+     educativos, de laboratorio o de diagnóstico, sin fines comerciales y
+     sin distribuir copias a terceros;
+
+  d) ejecutar el Software en el entorno interno de trabajo de una
+     organización, por su propio personal y bajo su propia
+     responsabilidad, siempre que no se redistribuya el Software ni se
+     ofrezca a terceros;
+
+  e) modificar el código para el uso privado previsto en las letras
+     anteriores, sin distribuir la obra resultante;
+
+  f) informar de errores o de vulnerabilidades conforme a SECURITY.md.
+
+4. Usos que requieren autorización previa y por escrito
+
+Salvo autorización previa y por escrito del Titular, queda prohibido:
+
+  a) copiar, reproducir, modificar, traducir, adaptar o crear obras
+     derivadas del Software, en todo o en parte, para fines distintos de
+     los permitidos en la cláusula 3;
+
+  b) distribuir, publicar, sublicenciar, vender, alquilar, prestar,
+     regalar, empaquetar, integrar en imágenes de sistema o en
+     instaladores de terceros, o poner a disposición del público el
+     Software o sus derivados, incluidos repositorios espejo, foros,
+     portales de descargas, alojamiento en la nube y modelos SaaS;
+
+  c) usar el Software, sus derivados o sus interfaces como componente de
+     un producto o servicio propio, comercial o gratuito;
+
+  d) ofrecer el Software, sus funciones o su mantenimiento como servicio a
+     terceros (consultoría, despliegue gestionado, soporte remoto);
+
+  e) suprimir, ocultar o alterar los avisos de derechos de autor, de
+     marca o de licencia, el encabezado de los scripts o la información
+     de autoría;
+
+  f) usar el nombre o el logotipo «DefenderTray», ni los nombres del
+     Titular, para identificar otros productos o servicios, ni para
+     sugerir una asociación, aval o patrocinio;
+
+  g) presentar el Software o una versión modificada como propia.
+
+5. Uso responsable y límites
+
+El Software controla las protecciones de seguridad de Microsoft Windows
+(Microsoft Defender Antivirus, SmartScreen, protección frente a
+manipulaciones, servicios y políticas de grupo asociadas). Al usarlo,
+aceptas que:
+
+  a) solo lo usarás en equipos de tu propiedad o sobre los que tengas una
+     autorización expresa para administrarlos, y con consentimiento del
+     responsable de la seguridad de la organización cuando la norma
+     interna lo exija;
+
+  b) queda prohibido usarlo, o usar sus variantes, para eludir,
+     debilitar, desactivar o inhabilitar las medidas de seguridad de
+     equipos ajenos, para facilitar el acceso no autorizado a un sistema,
+     para desplegar o ejecutar malware, o para ocultar actividad
+     maliciosa;
+
+  c) queda prohibido ofuscar, renombrar, fragmentar, recompilar o
+     modificar el Software con el propósito de evadir su detección por
+     productos de seguridad;
+
+  d) el Titular no autoriza ningún uso del Software que constituya acceso
+     ilícito a sistemas, interferencia con datos o incumplimiento de
+     normas de seguridad informática aplicables;
+
+  e) la desactivación de las protecciones puede dejar el equipo expuesto,
+     incumplir requisitos normativos o contractuales de tu organización,
+     invalidar pólizas de seguro o certificaciones, y requerir un reinicio
+     para devolver el sistema a un estado coherente: verificar el estado
+     tras cada uso es responsabilidad de quien lo ejecuta.
+
+6. Contribuciones
+
+Quien envíe una contribución (pull request, parche, issue, comentario,
+corrección documental o sugerencia) declara que es su autor o que tiene
+derecho a aportarla, y concede al Titular una licencia mundial,
+perpetua, irrevocable, gratuita, no exclusiva y transferible para usar,
+reproducir, modificar, sublicenciar y distribuir esa contribución como
+parte del Software o de otros productos, sin obligación de compensación.
+
+Quien contribuye garantiza además que su aportación no contiene secretos
+de terceros, datos personales de otras personas, credenciales, ni código
+cubierto por licencias incompatibles con este documento, y que no se
+destina a eludir controles de seguridad de equipos ajenos.
+
+Contribuir no otorga a quien contribuye ningún derecho de uso sobre el
+Software distinto de los de la cláusula 3.
+
+7. Componentes, servicios y datos de terceros
+
+El Software no incluye bibliotecas de terceros compiladas en su interior,
+pero puede descargar, instalar o conectarse a componentes y servicios
+de terceros (por ejemplo, el proveedor de acceso a SQLite, WiX Toolset,
+módulos de PowerShell de Microsoft, Active Directory, Microsoft Excel,
+OneDrive, Telegram, Firebase/Google, servidores SMTP y receptores de
+webhooks). Esos componentes y servicios se rigen por sus propias
+licencias, términos y políticas de privacidad, que prevalecen sobre este
+documento en lo que respecta a dichos componentes. El Software no
+modifica ni amplía ninguna licencia de terceros, y el Titular no es el
+proveedor de esos servicios.
+
+Los archivos, registros, copias de seguridad del registro, capturas y
+bases de datos que el Software genere en tu equipo son tuyos; el Titular
+no los recopila ni los almacena.
+
+8. Exclusión de garantías
+
+En la medida máxima permitida por la ley aplicable, el Software se
+proporciona «tal cual» y «según disponibilidad», sin garantías de ningún
+tipo, expresas o implícitas, incluidas las de comerciabilidad, idoneidad
+para un fin concreto, exactitud, disponibilidad y no infracción.
+
+En particular, el Titular no garantiza que el Software consiga o mantenga
+la desactivación o la reactivación de las protecciones de Windows en
+ninguna versión concreta del sistema, que siga siendo compatible tras una
+actualización de Windows, que las funciones etiquetadas como auxiliares,
+de demostración o incompletas funcionen según lo descrito, ni que su uso
+no provoque la detección del script por productos de seguridad.
+
+9. Limitación de responsabilidad
+
+En la medida máxima permitida por la ley aplicable, el Titular no será
+responsable de daños indirectos, incidentales, especiales, consecuentes o
+punitivos, ni de la pérdida de datos, ingresos, beneficios o negocio, ni
+de infecciones o compromisos del equipo, daños al sistema operativo,
+pérdida de arranque, inestabilidad, necesidad de reinstalar o formatear,
+costes de recuperación, incidencias en auditorías o sanciones
+regulatorias, contractuales o de seguros, derivados del uso o de la
+imposibilidad de usar el Software, incluso si se le ha avisado de la
+posibilidad de tales daños.
+
+Esta cláusula no limita las garantías que el Titular otorgue por escrito
+ni los derechos que la ley reconozca como irrenunciables.
+
+10. Sin soporte
+
+El Software es un proyecto personal, se publica con buena voluntad y sin
+acuerdo de nivel de servicio. No hay obligación de responder consultas,
+corregir errores, emitir actualizaciones o mantener compatibilidad con
+versiones anteriores. Las prácticas recomendadas de SECURITY.md y de la
+documentación son orientativas, no una garantía.
+
+11. Terminación
+
+Cualquier uso que incumpla este documento no está autorizado y termina
+automáticamente las autorizaciones concedidas, sin perjuicio de las
+acciones que correspondan al Titular. Al terminar, deberás dejar de usar
+y eliminar las copias del Software que poseas, sin derecho a reembolso
+alguno.
+
+12. Legislación, separabilidad e idioma
+
+Este documento se rige por la legislación que resulte aplicable al
+domicilio del Titular. Si alguna cláusula se declara nula o inaplicable,
+las restantes mantienen su validez y la cláusula afectada se interpretará
+o sustituirá por otra de efecto equivalente en la máxima medida permitida.
+Este documento se ofrece en español y en inglés; en caso de divergencia,
+prevalece la versión en español.
+
+13. Contacto
+
+Para solicitar autorización, una licencia de uso comercial, sublicencia o
+permisos adicionales, o para reportar vulnerabilidades conforme a
+SECURITY.md, dirígete al Titular en https://github.com/yhquintero o abre
+un issue en https://github.com/yhquintero/DefenderTray.
+
+
+======================================================================
+ENGLISH
+======================================================================
+
+1. Ownership
+
+DefenderTray — including its source code, the PowerShell scripts of every
+version stored in this repository, its graphical interface, the embedded
+templates (MSI, Docker, PWA, HTML panels), icons, texts, documentation
+(README.md, CONTRIBUTING.md, SECURITY.md, and this document), and the
+"DefenderTray" name and mark — (the "Software") is owned by yhquintero
+(the "Owner") and is protected by applicable intellectual property
+legislation and international treaties.
+
+2. Visible code, not open source
+
+The repository being public and the code being readable does not make the
+Software free or open source. No license or right is granted, whether
+express or implied, beyond those expressly stated in this document.
+
+3. Permitted uses without authorization
+
+No authorization from the Owner is required in order to:
+
+  a) view, study, and download the source code;
+
+  b) fork the repository within GitHub, to the extent permitted by
+     GitHub's Terms of Service, solely to read the code or to propose
+     contributions to the original repository through pull requests;
+
+  c) use the Software on machines you own or are explicitly authorised to
+     administer, for personal, educational, laboratory, or diagnostic
+     purposes, non-commercially, and without distributing copies to third
+     parties;
+
+  d) run the Software inside your own organisation's internal working
+     environment, by its own staff and under its own responsibility,
+     provided the Software is not redistributed or offered to third
+     parties;
+
+  e) modify the code for the private use contemplated above, without
+     distributing the resulting work;
+
+  f) report bugs or vulnerabilities as described in SECURITY.md.
+
+4. Uses requiring prior written authorization
+
+Unless the Owner gives prior written authorization, the following are
+prohibited:
+
+  a) copying, reproducing, modifying, translating, adapting, or creating
+     derivative works of the Software, in whole or in part, for purposes
+     other than those permitted by clause 3;
+
+  b) distributing, publishing, sublicensing, selling, renting, lending,
+     giving away, packaging, embedding in system images or third-party
+     installers, or otherwise making the Software or its derivatives
+     available to the public, including mirror repositories, forums,
+     download portals, cloud hosting, and SaaS offerings;
+
+  c) using the Software, its derivatives, or its interfaces as a component
+     of your own product or service, whether commercial or free;
+
+  d) offering the Software, its features, or its maintenance as a service
+     to third parties (consulting, managed deployments, remote support);
+
+  e) removing, hiding, or altering copyright, trademark, or license
+     notices, the script headers, or authorship information;
+
+  f) using the "DefenderTray" name or logo, or the Owner's names, to
+     identify other products or services, or to suggest affiliation,
+     endorsement, or sponsorship;
+
+  g) presenting the Software or a modified version as your own.
+
+5. Responsible use and limits
+
+The Software controls Microsoft Windows security protections (Microsoft
+Defender Antivirus, SmartScreen, tamper protection, related services and
+Group Policy settings). By using it, you acknowledge that:
+
+  a) you will use it only on machines you own or are explicitly authorised
+     to administer, and with the consent of your organisation's security
+     owner where internal rules require it;
+
+  b) using it, or variants of it, to circumvent, weaken, disable, or
+     disable-by-persistence the security controls of machines you do not
+     own, to facilitate unauthorised access to a system, to deploy or run
+     malware, or to conceal malicious activity, is prohibited;
+
+  c) obfuscating, renaming, splitting, recompiling, or otherwise
+     modifying the Software in order to evade detection by security
+     products is prohibited;
+
+  d) the Owner authorises no use of the Software that constitutes
+     unlawful access to systems, interference with data, or breach of
+     applicable computer-security rules;
+
+  e) disabling protections may leave a machine exposed, breach your
+     organisation's regulatory or contractual requirements, invalidate
+     insurance or certifications, and require a reboot to return the
+     system to a consistent state: verifying the state after each use is
+     your responsibility.
+
+6. Contributions
+
+By submitting a contribution (pull request, patch, issue, comment,
+documentation fix, or suggestion), you represent that you are its author or
+have the right to submit it, and you grant the Owner a worldwide,
+perpetual, irrevocable, royalty-free, non-exclusive, and transferable
+license to use, reproduce, modify, sublicense, and distribute that
+contribution as part of the Software or of other products, with no
+obligation to compensate you.
+
+Contributors further warrant that their contribution contains no third
+party secrets, personal data about other people, credentials, or code
+under licenses incompatible with this document, and that it is not
+intended to circumvent the security controls of machines belonging to
+others.
+
+Contributing grants you no right to use the Software beyond those in
+clause 3.
+
+7. Third-party components, services, and data
+
+The Software does not embed compiled third-party libraries, but it may
+download, install, or connect to third-party components and services (for
+example the SQLite access provider, WiX Toolset, Microsoft PowerShell
+modules, Active Directory, Microsoft Excel, OneDrive, Telegram,
+Firebase/Google, SMTP relays, and webhook receivers). Those components and
+services are governed by their own licenses, terms, and privacy policies,
+which prevail over this document with respect to those components. The
+Software does not modify or broaden any third-party license, and the Owner
+is not the provider of those services.
+
+The files, logs, registry backups, screenshots, and databases the
+Software generates on your machine are yours; the Owner does not collect
+or store them.
+
+8. Disclaimer of warranties
+
+To the maximum extent permitted by applicable law, the Software is
+provided "as is" and "as available", without warranties of any kind,
+express or implied, including warranties of merchantability, fitness for
+a particular purpose, accuracy, availability, and non-infringement.
+
+In particular, the Owner does not warrant that the Software will achieve
+or maintain the disabling or re-enabling of Windows protections on any
+specific version of the operating system, that it will remain compatible
+after a Windows update, that features labelled as helpers, demos, or
+incomplete will work as described, or that using it will not cause the
+script to be flagged by security products.
+
+9. Limitation of liability
+
+To the maximum extent permitted by applicable law, the Owner shall not be
+liable for any indirect, incidental, special, consequential, or punitive
+damages, nor for any loss of data, revenue, profits, or business, nor for
+infections or compromise of the machine, damage to the operating system,
+boot failure, instability, the need to reinstall or reformat, recovery
+costs, audit findings, or regulatory, contractual, or insurance
+consequences arising from the use of, or inability to use, the Software,
+even if the Owner has been advised of the possibility of such damages.
+
+This clause does not limit any warranty the Owner grants in writing, or
+any rights the law makes non-waivable.
+
+10. No support
+
+The Software is a personal project, published with goodwill and without
+any service-level agreement. There is no obligation to answer questions,
+fix bugs, ship updates, or maintain compatibility with earlier versions.
+The recommended practices in SECURITY.md and in the documentation are
+guidance, not a warranty.
+
+11. Termination
+
+Any use that breaches this document is unauthorised and automatically
+terminates the permissions granted, without prejudice to any action
+available to the Owner. On termination you must stop using and delete the
+copies of the Software you hold, with no right to any refund.
+
+12. Governing law, severability, and language
+
+This document is governed by the law applicable to the Owner's place of
+residence. If any clause is held void or unenforceable, the remaining
+clauses stay in force and the affected clause shall be interpreted or
+replaced by one with an equivalent effect to the maximum extent permitted.
+This document is provided in Spanish and English; in case of divergence,
+the Spanish version prevails.
+
+13. Contact
+
+To request authorisation, a commercial use license, a sublicence, or
+additional permissions, or to report vulnerabilities as described in
+SECURITY.md, contact the Owner at https://github.com/yhquintero or open an
+issue at https://github.com/yhquintero/DefenderTray.
