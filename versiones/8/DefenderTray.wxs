@@ -1,33 +1,57 @@
-﻿<?xml version="1.0" encoding="UTF-8"?>
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Instalador de DefenderTray 8.2 (WiX Toolset v3, x64, instalacion por maquina).
+
+  Los tres puntos que hacen que compile sin los errores ICE de siempre:
+
+    * Platform="x64" y Win64="yes" -> el paquete y sus componentes son de
+      64 bits. Sin esto: ICE80 "This 32BitComponent MainScript uses 64BitDirectory
+      INSTALLFOLDER" y "This 32BitComponent StartMenuShortcut uses 64BitDirectory
+      INSTALLFOLDER". Con Win64="yes" explicito el componente es de 64 bits
+      aunque se compile sin -arch, y Platform="x64" escribe "x64;1033" en el
+      Template Summary del paquete.
+    * El componente del acceso directo vive dentro de ProgramMenuDir y su
+      RemoveFolder declara ese mismo directorio -> la carpeta queda listada en
+      la tabla RemoveFile. Sin esto: ICE64 "The directory ProgramMenuDir is in
+      the user profile but is not listed in the RemoveFile table".
+    * La clave de registro es HKLM -> el componente es por maquina, asi que el
+      menu Inicio es el de todos los usuarios y no el del perfil del usuario.
+
+  Para compilar:
+     candle.exe -nologo -arch x64 -ext WixUIExtension DefenderTray.wxs
+     light.exe  -nologo -ext WixUIExtension -o DefenderTray_v8.2.msi DefenderTray.wixobj
+-->
 <Wix xmlns="http://schemas.microsoft.com/wix/2006/wi">
   <Product Id="*" Name="DefenderTray Ultimate" Language="1033"
-           Version="8.1.0.0" Manufacturer="Ing. Yosvany Hernandez Quintero"
+           Version="8.2.0.0" Manufacturer="Ing. Yosvany Hernandez Quintero"
            UpgradeCode="A1B2C3D4-E5F6-7890-ABCD-EF1234567890">
-    <Package InstallerVersion="500" Compressed="yes" InstallScope="perMachine"/>
+    <Package InstallerVersion="500" Compressed="yes" InstallScope="perMachine" Platform="x64"/>
     <MajorUpgrade DowngradeErrorMessage="Ya existe una version instalada."/>
     <MediaTemplate EmbedCab="yes"/>
+    <Condition Message="DefenderTray necesita Windows de 64 bits (x64).">VersionNT64</Condition>
     <Directory Id="TARGETDIR" Name="SourceDir">
       <Directory Id="ProgramFiles64Folder">
         <Directory Id="INSTALLFOLDER" Name="DefenderTray">
-          <Component Id="MainScript" Guid="*">
-            <File Id="ScriptPs1" Source="DefenderTray_8.1.ps1" KeyPath="yes"/>
-          </Component>
-          <Component Id="StartMenuShortcut" Guid="*">
-            <Shortcut Id="AppShortcut" Directory="ProgramMenuDir"
-                      Name="DefenderTray v8.1"
-                      Target="[System64Folder]WindowsPowerShell\v1.0\powershell.exe"
-                      Arguments="-WindowStyle Hidden -ExecutionPolicy Bypass -File &quot;[INSTALLFOLDER]DefenderTray_8.1.ps1&quot;"
-                      WorkingDirectory="INSTALLFOLDER"/>
-            <RemoveFolder Id="ProgramMenuDir" On="uninstall"/>
-            <RegistryValue Root="HKCU" Key="Software\DefenderTray" Name="installed" Type="integer" Value="1" KeyPath="yes"/>
+          <Component Id="MainScript" Guid="*" Win64="yes">
+            <File Id="ScriptPs1" Source="DefenderTray_8.2.ps1" KeyPath="yes"/>
           </Component>
         </Directory>
       </Directory>
       <Directory Id="ProgramMenuFolder" Name="Programs">
-        <Directory Id="ProgramMenuDir" Name="DefenderTray"/>
+        <Directory Id="ProgramMenuDir" Name="DefenderTray">
+          <Component Id="StartMenuShortcut" Guid="*" Win64="yes">
+            <Shortcut Id="AppShortcut" Directory="ProgramMenuDir"
+                      Name="DefenderTray v8.2"
+                      Target="[System64Folder]WindowsPowerShell\v1.0\powershell.exe"
+                      Arguments="-NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File &quot;[INSTALLFOLDER]DefenderTray_8.2.ps1&quot;"
+                      WorkingDirectory="INSTALLFOLDER"/>
+            <RemoveFolder Id="ProgramMenuDir" Directory="ProgramMenuDir" On="uninstall"/>
+            <RegistryValue Root="HKLM" Key="Software\DefenderTray" Name="installed" Type="integer" Value="1" KeyPath="yes"/>
+          </Component>
+        </Directory>
       </Directory>
     </Directory>
-    <Feature Id="MainFeature" Title="DefenderTray v8.1" Level="1">
+    <Feature Id="MainFeature" Title="DefenderTray v8.2" Level="1">
       <ComponentRef Id="MainScript"/>
       <ComponentRef Id="StartMenuShortcut"/>
     </Feature>

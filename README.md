@@ -69,7 +69,7 @@ A partir de la rama 8.x el proyecto dejó de ser un simple *toggle* y añade una
 | **Sistema operativo** | Windows 10 1607 / Windows 11 | Windows Server 2016+ funciona (detecta `ProductType`). Windows 7/8/8.1: la UI arranca, pero las API de políticas modernas y la protección frente a manipulaciones se comportan distinto: pruébalo antes de confiar en ellas. |
 | **PowerShell** | Windows PowerShell **5.1** | Está incluido en Windows. PowerShell 7 también carga, pero los ensamblados WPF/Speech/WinForms se apoyan en .NET Framework: si algo del panel no aparece, usa 5.1. |
 | **.NET Framework** | 4.5+ | Necesario para `System.Windows.Forms` y `System.Drawing`. |
-| **Permisos** | Administrador, con UAC elevada | Sin administración la herramienta se limita a leer y avisar. |
+| **Permisos** | Administrador | Desde la v8 (8.0, 8.1 y 8.2) el script **se eleva solo**: si arranca sin permisos, se relanza con UAC como Administrador y espera al proceso elevado. Con `-noelevate` se desactiva esa elevación. |
 | **Privilegios especiales** | `SeDebugPrivilege` no requerido | Algunas acciones usan `taskkill`, `sc.exe`, `reg.exe` y `netsh http`. |
 | **Módulos opcionales** | `ActiveDirectory` (RSAT), `ImportExcel` | Sin ellos, el inventario de AD y la exportación `.xlsx` degradan con elegancia a «no disponible» o a COM de Excel. |
 | **SQLite (opcional)** | `System.Data.SQLite` | Si falta, el script intenta bajar el paquete NuGet `System.Data.SQLite.Core` 1.0.118.1 a `lib\` y, si no puede, usa JSON. Para equipos sin salida a Internet, copia antes `System.Data.SQLite.dll` y `SQLite.Interop.dll` en `lib\` — y verifica el hash, como se explica en [SECURITY.md](SECURITY.md#-límites-conocidos-y-mitigaciones). |
@@ -100,6 +100,58 @@ Para arrancarlo con doble clic, crea un acceso directo con este destino:
 ```text
 C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File "C:\DefenderTray\DefenderTray_8.2_Pro.ps1" -silent
 ```
+
+> [!TIP]
+> **No hace falta abrir la consola como Administrador.** Desde la v8 el script comprueba sus privilegios al arrancar y, si no los tiene, se vuelve a lanzar con UAC como Administrador (mismo motor, mismos argumentos, mismo codigo de salida). El acceso directo del MSI y el doble clic funcionan igual: lo unico que cambia es que aparece el UAC. Si cancelas el UAC, el script avisa y termina con codigo `1` en vez de fingir que puede hacer lo que no puede.
+
+## 📦 Instalador MSI (WiX Toolset v3)
+
+El MSI se compila con [WiX Toolset v3](https://wixtoolset.org/releases/) (la v3.11 funciona bien). En [`versiones/8/`](versiones/8) hay tres piezas:
+
+| Fichero | Para que sirve |
+|---|---|
+| [`DefenderTray.wxs`](versiones/8/DefenderTray.wxs) | Plantilla de WiX **ya corregida** (x64, instalacion por maquina). |
+| [`Add-WiXToPath.ps1`](versiones/8/Add-WiXToPath.ps1) | Mete `C:\Program Files (x86)\WiX Toolset v3.11\bin` en el PATH de Windows. |
+| [`build-msi.ps1`](versiones/8/build-msi.ps1) | Compila el MSI de una vez (candle + light) y comprueba el resultado. |
+
+**1) WiX en el PATH.** Si `candle.exe` no se encuentra, esto es lo que falta:
+
+```powershell
+# Solo para tu usuario (no hace falta ser Administrador)
+.\versiones\8\Add-WiXToPath.ps1
+
+# Para todo el equipo (abre la consola como Administrador)
+.\versiones\8\Add-WiXToPath.ps1 -Scope Machine
+
+# Solo en la consola actual, sin tocar el PATH guardado
+.\versiones\8\Add-WiXToPath.ps1 -SessionOnly
+```
+
+Abre una consola nueva despues: el PATH guardado por Windows solo se lee al arrancar la consola.
+
+**2) Compilar el MSI:**
+
+```powershell
+.\versiones\8\build-msi.ps1                # v8.2 -> %USERPROFILE%\Desktop\DefenderTray_v8.2_MSI
+.\versiones\8\build-msi.ps1 -Version 8.1   # otra version
+```
+
+O a mano, con los mismos interruptores que usa el script:
+
+```powershell
+cd C:\Users\usuario\Desktop\DefenderTray_v8_MSI
+candle.exe -nologo -arch x64 -ext WixUIExtension DefenderTray.wxs
+light.exe  -nologo -ext WixUIExtension -o DefenderTray_v8.2.msi DefenderTray.wixobj
+```
+
+**Errores ICE que ya no salen** (y por que):
+
+| Error | Causa | Como queda resuelto en el `.wxs` |
+|---|---|---|
+| `ICE80: This 32BitComponent MainScript uses 64BitDirectory INSTALLFOLDER` | El paquete se compilaba como x86 (`candle.exe` sin `-arch`) mientras la carpeta de instalacion era de 64 bits. | `Platform="x64"` en `<Package>` (escribe `x64;1033` en el Template Summary) y `Win64="yes"` explicito en cada `<Component>`, que vale aunque se compile sin `-arch`. |
+| `ICE64: The directory ProgramMenuDir is in the user profile but is not listed in the RemoveFile table` | El acceso directo era un componente **por usuario** (clave de registro en `HKCU`), asi que la carpeta del menu Inicio caia dentro del perfil del usuario y no estaba en la tabla `RemoveFile`. | El componente vive **dentro** de `ProgramMenuDir` y lleva `<RemoveFolder Id="ProgramMenuDir" Directory="ProgramMenuDir" On="uninstall"/>`, que lista la carpeta en `RemoveFile`; ademas la clave pasa a `HKLM`, con lo que el acceso directo es **por maquina** y la carpeta del menu Inicio es la de todos los usuarios. |
+
+> Si una version muy antigua de WiX insistiera con el ICE64, `light.exe -sice:ICE64` lo silencia, pero la causa ya esta corregida: no deberia hacer falta.
 
 ## 🧰 Qué hace cada acción
 
@@ -139,6 +191,7 @@ Consola con acciones numeradas: **1. Borrar políticas**, **2. Servicios**, **3.
 | `-https` | Sirve la API por HTTPS con certificado autofirmado (`CN=DefenderTray Localhost`, 5 años) en `LocalMachine\My`. |
 | `-action enable` / `-action disable` | Ejecuta la acción por consola y sale con código `0`. |
 | `-autoupdate` | Comprueba si hay una versión nueva en GitHub Releases y lo deja en el log. |
+| `-noelevate` | No se auto-eleva a Administrador: sigue con los permisos que tenga. Para pruebas, auditoria o equipos sin UAC. |
 
 ## 🌐 API local
 
@@ -232,6 +285,8 @@ El código vive en [`versiones/`](versiones/), una carpeta por hito. Esta es la 
 | `REST no arranco` o el puerto está ocupado | Otro proceso escucha en 9182 o falta la reserva `urlacl`. | Cambia el puerto en Configuración, arranca con `-norest`, o revisa las reservas con `netsh http show urlacl` y libera la antigua con `netsh http delete urlacl`.  |
 | No se ven los gráficos / el tema sale raro en PowerShell 7 | Ensamblados dependientes de .NET Framework. | Ejecuta con `powershell.exe` (5.1) en lugar de `pwsh`. |
 | «No se pudo cargar SQLite» | Sin salida a Internet o sin permisos en `lib\`. | Copia manualmente las dos DLL, o ignóralo: el historial pasa a JSON sin perder funciones. |
+| `candle.exe` / `light.exe` no se encuentran | WiX Toolset v3 instalado pero su carpeta `bin` no esta en el PATH. | Ejecuta `versiones\8\Add-WiXToPath.ps1` (o `-Scope Machine` como Administrador) y abre una consola nueva. |
+| `LGHT0204 : ICE64` o `ICE80` al compilar el MSI | Plantilla de WiX antigua: componente por usuario y paquete x86. | La plantilla [`versiones/8/DefenderTray.wxs`](versiones/8/DefenderTray.wxs) ya lo corrige; recompila con `versiones\8\build-msi.ps1`. |
 | SmartScreen avisa del script | Es normal en un `.ps1` no firmado descargado de Internet. | Verifica el SHA256 contra esta página y, si lo vas a desplegar, fírmalo con tu propio certificado. |
 | Acentos o `ñ` mal mostrados en un diálogo | Archivo leído como ANSI. | Guarda los `.ps1` en UTF-8 sin BOM y CRLF (como los de este repo) y evita caracteres fuera del ASCII en las cadenas: ver [CONTRIBUTING.md](CONTRIBUTING.md#-estilo-y-convenciones). |
 
@@ -258,6 +313,7 @@ versiones/
   6/  DefenderTray_6.0_Pro.ps1                 API REST, DPAPI, Windows Server, -audit
   7/  DefenderTray_7.0_Pro.ps1                 Panel web, Telegram, modo forense y tutela
   8/  DefenderTray_8.0_Pro.ps1, 8.1_Pro.ps1, 8.2_Pro.ps1   Capa «enterprise» (la recomendada)
+      DefenderTray.wxs, build-msi.ps1, Add-WiXToPath.ps1    Plantilla MSI (WiX v3) y ayudas de compilacion
   README.md                                    Índice del histórico y reglas de la carpeta
 
 CHANGELOG.md · README.md · CONTRIBUTING.md · LICENSE · SECURITY.md
@@ -389,7 +445,11 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\DefenderTray_8.2_Pro.ps1  
 
 On Windows 11, turn **Tamper Protection** off first if you want a full disable in one go: while it is on, Windows blocks the changes — since v8.2 the tool still applies everything that persists and offers a button to open Windows Security, and an incomplete disable needs a reboot to settle (reported as «pending reboot», not as partial).
 
-**Switches.** `-silent` (no dialogs), `-portable` (data next to the script), `-audit` (log only, apply nothing), `-norest` (no local API), `-https` (self-signed TLS), `-action enable|disable`, `-autoupdate`.
+**Switches.** `-silent` (no dialogs), `-portable` (data next to the script), `-audit` (log only, apply nothing), `-norest` (no local API), `-https` (self-signed TLS), `-action enable|disable`, `-autoupdate`, `-noelevate` (do not ask for elevation).
+
+**Elevation.** Since v8 the script **elevates itself**: started without administrator rights it re-launches through UAC (same engine, same arguments, same exit code) and waits for it. The MSI shortcut and a double click therefore work without an elevated console. Decline the UAC prompt and the script says so and exits with code `1` instead of pretending.
+
+**MSI packaging.** The v8 layer ships a WiX v3 template ([`versiones/8/DefenderTray.wxs`](versiones/8/DefenderTray.wxs)) with the ICE64/ICE80 fixes already applied, plus two helpers: [`Add-WiXToPath.ps1`](versiones/8/Add-WiXToPath.ps1) puts `C:\Program Files (x86)\WiX Toolset v3.11\bin` on the PATH and [`build-msi.ps1`](versiones/8/build-msi.ps1) compiles the MSI with candle and light.
 
 **Local API.** Serves on `127.0.0.1:9182` only: `/` (SSE dashboard), `/status`, `/enable`, `/disable`, `/emergency` (executes re-activation), `/diagnostic`, `/fleet`, `/fleet/computers`, `POST /fleet/command`, `POST /fleet/broadcast`, `POST /graphql`, `/sse/stream`, `/pwa/*`. **There is no authentication**, so run with `-norest` on shared or server machines.
 
