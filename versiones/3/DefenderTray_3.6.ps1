@@ -1,0 +1,1057 @@
+<#
+.SYNOPSIS
+    Control visual de Windows Defender desde la bandeja del sistema.
+.DESCRIPTION
+    - Version OPTIMIZADA para evitar congelamiento del sistema.
+    - Timer a 5 segundos con consultas ligeras (sin WMI).
+    - Cache de 30 segundos para consultas pesadas.
+    - Operaciones no bloquean la UI (DoEvents).
+    - Sin Update-MpSignature (evita descargas que congelan).
+    - Panel con botones coloreados y log integrado.
+.NOTES
+    Ejecutar como Administrador.
+    Compatible con Windows 7, 8, 8.1, 10 y 11.
+    Creado por: Ing. Yosvany Hernandez Quintero
+    Movil: +53 5 2160801 / +53 5 9860911
+    Version: 3.6
+#>
+
+# ==================================================================
+# 1. ENSAMBLADOS
+# ==================================================================
+Add-Type -AssemblyName System.Windows.Forms
+Add-Type -AssemblyName System.Drawing
+
+# ==================================================================
+# 2. TEXTOS ASCII
+# ==================================================================
+$script:O_ACCENT       = [char]0x00D3
+$script:TXT_PROTECCION = "PROTECCI" + $script:O_ACCENT + "N"
+$script:TXT_ACTIVAR    = "ACTIVAR " + $script:TXT_PROTECCION
+$script:TXT_DESACTIVAR = "DESACTIVAR " + $script:TXT_PROTECCION
+
+# ==================================================================
+# 3. LOG
+# ==================================================================
+$script:LogFolder = Join-Path $env:LOCALAPPDATA "DefenderTray\Logs"
+$script:LogFile   = Join-Path $script:LogFolder ("DefenderTray_{0:yyyy-MM-dd}.log" -f (Get-Date))
+if (-not (Test-Path $script:LogFolder)) {
+    New-Item -Path $script:LogFolder -ItemType Directory -Force | Out-Null
+}
+
+function Write-AppLog {
+    param([string]$Mensaje, [string]$Nivel = "INFO")
+    try {
+        $linea = "[{0:yyyy-MM-dd HH:mm:ss}] [{1}] {2}" -f (Get-Date), $Nivel, $Mensaje
+        Add-Content -Path $script:LogFile -Value $linea -Encoding UTF8 -ErrorAction SilentlyContinue
+    } catch { }
+}
+
+# ==================================================================
+# 4. UTILIDAD: ESPERA SIN BLOQUEAR LA UI
+#    Procesa los mensajes de Windows cada 50ms para que la ventana
+#    siga respondiendo mientras se espera.
+# ==================================================================
+function Wait-WithDoEvents {
+    param([int]$Milliseconds)
+    $end = (Get-Date).AddMilliseconds($Milliseconds)
+    while ((Get-Date) -lt $end) {
+        try { [System.Windows.Forms.Application]::DoEvents() } catch { }
+        Start-Sleep -Milliseconds 50
+    }
+}
+
+# ==================================================================
+# 5. PALETA
+# ==================================================================
+$script:Colors = @{
+    HeaderOk       = [System.Drawing.Color]::FromArgb(34, 139, 34)
+    HeaderWarn     = [System.Drawing.Color]::FromArgb(178, 34, 34)
+    HeaderPartial  = [System.Drawing.Color]::FromArgb(200, 130, 0)
+    HeaderUnknown  = [System.Drawing.Color]::FromArgb(70, 70, 70)
+    Background     = [System.Drawing.Color]::FromArgb(245, 247, 250)
+    CardBg         = [System.Drawing.Color]::White
+    TextMuted      = [System.Drawing.Color]::FromArgb(108, 117, 125)
+    TextDiag       = [System.Drawing.Color]::FromArgb(80, 80, 80)
+    BtnGreen       = [System.Drawing.Color]::FromArgb(40, 167, 69)
+    BtnGreenHover  = [System.Drawing.Color]::FromArgb(33, 136, 56)
+    BtnRed         = [System.Drawing.Color]::FromArgb(220, 53, 69)
+    BtnRedHover    = [System.Drawing.Color]::FromArgb(178, 40, 54)
+    BtnGray        = [System.Drawing.Color]::FromArgb(210, 210, 210)
+    BtnGrayText    = [System.Drawing.Color]::FromArgb(130, 130, 130)
+    BtnBlue        = [System.Drawing.Color]::FromArgb(0, 123, 255)
+    BtnBlueHover   = [System.Drawing.Color]::FromArgb(0, 98, 204)
+    BtnDarkGray    = [System.Drawing.Color]::FromArgb(108, 117, 125)
+    BtnDarkGrayHov = [System.Drawing.Color]::FromArgb(84, 91, 98)
+    BtnTeal        = [System.Drawing.Color]::FromArgb(23, 162, 184)
+    BtnTealHover   = [System.Drawing.Color]::FromArgb(17, 122, 139)
+}
+
+# ==================================================================
+# 6. ESTADO RAPIDO (SIN WMI)
+#    Solo Get-Service + lectura de registro. Menos de 50ms.
+#    Se usa en cada tick del timer.
+# ==================================================================
+function Test-DefenderPolicyDisabled {
+    $regPath = "HKLM:\SOFTWARE\Policies\Microsoft\Windows Defender"
+    try {
+        if (-not (Test-Path $regPath)) { return $false }
+        $props = Get-ItemProperty -Path $regPath -ErrorAction SilentlyContinue
+        if ($null -ne $props) {
+            if ($null -ne $props.DisableAntiSpyware -and [int]$props.DisableAntiSpyware -eq 1) { return $true }
+            if ($null -ne $props.DisableAntiVirus   -and [int]$props.DisableAntiVirus   -eq 1) { return $true }
+        }
+        $rtPath = Join-Path $regPath "Real-Time Protection"
+        if (Test-Path $rtPath) {
+            $rtProps = Get-ItemProperty -Path $rtPath -ErrorAction SilentlyContinue
+            if ($null -ne $rtProps) {
+                foreach ($n in @("DisableRealtimeMonitoring","DisableBehaviorMonitoring",
+                                 "DisableOnAccessProtection","DisableScanOnRealtimeEnable",
+                                 "DisableIOAVProtection","DisableScriptScanning")) {
+                    if ($null -ne $rtProps.$n -and [int]$rtProps.$n -eq 1) { return $true }
+                }
+            }
+        }
+    } catch { }
+    return $false
+}
+
+function Test-RTPDisabled {
+    # Buscar DisableRealtimeMonitoring en las dos rutas relevantes
+    $paths = @(
+        "HKLM:\SOFTWARE\Policies\Microsoft\Windows Defender\Real-Time Protection",
+        "HKLM:\SOFTWARE\Microsoft\Windows Defender\Real-Time Protection"
+    )
+    foreach ($p in $paths) {
+        if (Test-Path $p) {
+            $v = Get-ItemProperty -Path $p -ErrorAction SilentlyContinue
+            if ($null -ne $v -and $null -ne $v.DisableRealtimeMonitoring) {
+                if ([int]$v.DisableRealtimeMonitoring -eq 1) { return $true }
+            }
+        }
+    }
+    return $false
+}
+
+function Get-QuickStatus {
+    # RAPIDO: sin WMI, sin cmdlets de Defender.
+    $svc = Get-Service -Name WinDefend -ErrorAction SilentlyContinue
+    $running = ($null -ne $svc) -and ($svc.Status -eq 'Running')
+    $rtpDisabled = Test-RTPDisabled
+    $hasPolicy = Test-DefenderPolicyDisabled
+
+    $isActive = $running -and (-not $rtpDisabled) -and (-not $hasPolicy)
+
+    return [PSCustomObject]@{
+        ServiceRunning            = $running
+        RealTimeProtectionEnabled = -not $rtpDisabled
+        HasPolicy                 = $hasPolicy
+        IsActive                  = $isActive
+    }
+}
+
+# ==================================================================
+# 7. ESTADO COMPLETO (CON WMI, PERO CACHEADO 30s)
+#    Se usa solo al arrancar, tras operaciones, o si el cache expira.
+# ==================================================================
+$script:CachedFullStatus     = $null
+$script:CachedFullStatusTime = [DateTime]::MinValue
+
+function Get-FullStatus {
+    $age = ((Get-Date) - $script:CachedFullStatusTime).TotalSeconds
+    if ($null -ne $script:CachedFullStatus -and $age -lt 30) {
+        return $script:CachedFullStatus
+    }
+
+    $tamper = $false
+    try {
+        if (Get-Command Get-MpComputerStatus -ErrorAction SilentlyContinue) {
+            $st = Get-MpComputerStatus -ErrorAction Stop
+            $tamper = [bool]$st.IsTamperProtected
+        }
+    } catch { }
+
+    $quick = Get-QuickStatus
+    $result = [PSCustomObject]@{
+        ServiceRunning            = $quick.ServiceRunning
+        RealTimeProtectionEnabled = $quick.RealTimeProtectionEnabled
+        HasPolicy                 = $quick.HasPolicy
+        IsActive                  = $quick.IsActive
+        IsTamperProtected         = $tamper
+    }
+    $script:CachedFullStatus = $result
+    $script:CachedFullStatusTime = Get-Date
+    return $result
+}
+
+function Clear-StatusCache {
+    $script:CachedFullStatus = $null
+    $script:CachedFullStatusTime = [DateTime]::MinValue
+}
+
+# ==================================================================
+# 8. DESACTIVAR
+# ==================================================================
+function Disable-Defender {
+    $log = New-Object System.Collections.ArrayList
+    $sw  = [System.Diagnostics.Stopwatch]::StartNew()
+
+    # Tamper
+    try {
+        if (Get-Command Get-MpComputerStatus -ErrorAction SilentlyContinue) {
+            $tp = Get-MpComputerStatus -ErrorAction Stop
+            if ($tp.IsTamperProtected) {
+                [void]$log.Add("ERROR: Tamper Protection ACTIVA. Desactivala desde Seguridad de Windows.")
+                Write-AppLog "Desactivacion bloqueada: Tamper Protection activa." "ERROR"
+                return ($log -join "`n")
+            }
+        }
+    } catch {}
+
+    Write-AppLog "Iniciando desactivacion..." "INFO"
+
+    # 1) Set-MpPreference (rapido)
+    try {
+        if (Get-Command Set-MpPreference -ErrorAction SilentlyContinue) {
+            Set-MpPreference -DisableRealtimeMonitoring $true -Force -ErrorAction SilentlyContinue
+            [void]$log.Add("[1] Preferencias RTP: DESACTIVADAS")
+            Write-AppLog "Set-MpPreference aplicado." "INFO"
+        }
+    } catch { [void]$log.Add("[1] Aviso: $($_.Exception.Message)") }
+
+    # 2) Servicios relacionados
+    foreach ($svcName in @("WdNisSvc", "Sense")) {
+        try {
+            Stop-Service -Name $svcName -Force -ErrorAction SilentlyContinue
+            Set-Service  -Name $svcName -StartupType Disabled -ErrorAction SilentlyContinue
+            [void]$log.Add("[2] Servicio ${svcName}: DETENIDO")
+        } catch { }
+    }
+
+    # 3) WinDefend
+    Stop-Service -Name WinDefend -Force -ErrorAction SilentlyContinue
+    Set-Service  -Name WinDefend -StartupType Disabled -ErrorAction SilentlyContinue
+    $null = & sc.exe config WinDefend start= disabled 2>&1
+    $null = & sc.exe stop WinDefend 2>&1
+
+    # 4) Registro directo
+    try {
+        $svcRegPath = "HKLM:\SYSTEM\CurrentControlSet\Services\WinDefend"
+        if (Test-Path $svcRegPath) {
+            Set-ItemProperty -Path $svcRegPath -Name "Start" -Value 4 -Type DWord -Force -ErrorAction SilentlyContinue
+            [void]$log.Add("[3] Registro WinDefend\Start = 4")
+        }
+    } catch { }
+
+    # 5) Politicas
+    $regPath = "HKLM:\SOFTWARE\Policies\Microsoft\Windows Defender"
+    if (-not (Test-Path $regPath)) { New-Item -Path $regPath -Force | Out-Null }
+    New-ItemProperty -Path $regPath -Name "DisableAntiSpyware" -Value 1 -PropertyType DWord -Force -ErrorAction SilentlyContinue | Out-Null
+    New-ItemProperty -Path $regPath -Name "DisableAntiVirus"   -Value 1 -PropertyType DWord -Force -ErrorAction SilentlyContinue | Out-Null
+    $rtPath = Join-Path $regPath "Real-Time Protection"
+    if (-not (Test-Path $rtPath)) { New-Item -Path $rtPath -Force | Out-Null }
+    New-ItemProperty -Path $rtPath -Name "DisableRealtimeMonitoring" -Value 1 -PropertyType DWord -Force -ErrorAction SilentlyContinue | Out-Null
+    [void]$log.Add("[4] Politicas de registro establecidas.")
+
+    # 6) Verificar con espera NO bloqueante
+    Wait-WithDoEvents -Milliseconds 2500
+    $svc = Get-Service -Name WinDefend -ErrorAction SilentlyContinue
+    if ($null -ne $svc -and $svc.Status -eq 'Running') {
+        [void]$log.Add("[5] Windows reinicio el servicio. Reintentando...")
+        $null = & sc.exe stop WinDefend 2>&1
+        Stop-Service -Name WinDefend -Force -ErrorAction SilentlyContinue
+        try {
+            $svcRegPath = "HKLM:\SYSTEM\CurrentControlSet\Services\WinDefend"
+            Set-ItemProperty -Path $svcRegPath -Name "Start" -Value 4 -Type DWord -Force -ErrorAction SilentlyContinue
+        } catch { }
+        Wait-WithDoEvents -Milliseconds 1500
+    }
+
+    $sw.Stop()
+    [void]$log.Add("[OK] Tiempo total: {0:N2} segundos" -f $sw.Elapsed.TotalSeconds)
+    Write-AppLog ("Desactivacion completada en {0:N2}s" -f $sw.Elapsed.TotalSeconds) "INFO"
+    Clear-StatusCache
+    return ($log -join "`n")
+}
+
+# ==================================================================
+# 9. ACTIVAR
+# ==================================================================
+function Enable-Defender {
+    $log = New-Object System.Collections.ArrayList
+    $sw  = [System.Diagnostics.Stopwatch]::StartNew()
+
+    Write-AppLog "Iniciando activacion..." "INFO"
+
+    # 1) Registro Start = 2
+    try {
+        $svcRegPath = "HKLM:\SYSTEM\CurrentControlSet\Services\WinDefend"
+        if (Test-Path $svcRegPath) {
+            Set-ItemProperty -Path $svcRegPath -Name "Start" -Value 2 -Type DWord -Force -ErrorAction SilentlyContinue
+            [void]$log.Add("[1] Registro WinDefend\Start = 2 (Automatic)")
+        }
+    } catch { }
+
+    # 2) Borrar politicas recursivamente
+    $regPath = "HKLM:\SOFTWARE\Policies\Microsoft\Windows Defender"
+    try {
+        if (Test-Path $regPath) {
+            Remove-Item -Path $regPath -Recurse -Force -ErrorAction Stop
+            [void]$log.Add("[2] Rama de politicas eliminada.")
+        } else {
+            [void]$log.Add("[2] No habia politicas.")
+        }
+    } catch {
+        Remove-ItemProperty -Path $regPath -Name "DisableAntiSpyware" -Force -ErrorAction SilentlyContinue
+        Remove-ItemProperty -Path $regPath -Name "DisableAntiVirus"   -Force -ErrorAction SilentlyContinue
+        [void]$log.Add("[2] Politicas eliminadas (fallback).")
+    }
+
+    # 3) Limpiar RTP de trabajo
+    $rtWk = "HKLM:\SOFTWARE\Microsoft\Windows Defender\Real-Time Protection"
+    try {
+        if (Test-Path $rtWk) {
+            foreach ($n in @("DisableRealtimeMonitoring","DisableBehaviorMonitoring",
+                             "DisableOnAccessProtection","DisableScanOnRealtimeEnable",
+                             "DisableIOAVProtection","DisableScriptScanning")) {
+                Remove-ItemProperty -Path $rtWk -Name $n -Force -ErrorAction SilentlyContinue
+            }
+            [void]$log.Add("[3] Claves RTP limpiadas.")
+        }
+    } catch { }
+
+    # 4) Reactivar servicios
+    foreach ($svcName in @("WdNisSvc", "Sense")) {
+        try {
+            $svc = Get-Service -Name $svcName -ErrorAction SilentlyContinue
+            if ($null -ne $svc) {
+                Set-Service  -Name $svcName -StartupType Automatic -ErrorAction SilentlyContinue
+                $null = & sc.exe config $svcName start= auto 2>&1
+                Start-Service -Name $svcName -ErrorAction SilentlyContinue
+                [void]$log.Add("[4] Servicio ${svcName}: INICIADO")
+            }
+        } catch { }
+    }
+
+    try {
+        Set-Service  -Name WinDefend -StartupType Automatic -ErrorAction SilentlyContinue
+        $null = & sc.exe config WinDefend start= auto 2>&1
+        Start-Service -Name WinDefend -ErrorAction SilentlyContinue
+        [void]$log.Add("[5] Servicio WinDefend: INICIADO")
+    } catch { [void]$log.Add("[5] Aviso: $($_.Exception.Message)") }
+
+    # 5) Esperar SIN bloquear la UI
+    Wait-WithDoEvents -Milliseconds 3000
+
+    # 6) Reactivar preferencias
+    try {
+        if (Get-Command Set-MpPreference -ErrorAction SilentlyContinue) {
+            Set-MpPreference -DisableRealtimeMonitoring $false -Force -ErrorAction SilentlyContinue
+            [void]$log.Add("[6] RTP: ACTIVADO")
+        }
+    } catch { }
+
+    # Segunda pasada breve
+    Wait-WithDoEvents -Milliseconds 1500
+    try { Set-MpPreference -DisableRealtimeMonitoring $false -Force -ErrorAction SilentlyContinue } catch { }
+
+    $sw.Stop()
+    [void]$log.Add("[OK] Tiempo total: {0:N2} segundos" -f $sw.Elapsed.TotalSeconds)
+    Write-AppLog ("Activacion completada en {0:N2}s" -f $sw.Elapsed.TotalSeconds) "INFO"
+    Clear-StatusCache
+    return ($log -join "`n")
+}
+
+# ==================================================================
+# 10. ADMIN
+# ==================================================================
+function Test-Admin {
+    return ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole(
+        [Security.Principal.WindowsBuiltInRole]::Administrator)
+}
+
+# ==================================================================
+# 11. OS INFO
+# ==================================================================
+function Get-OSInfo {
+    try {
+        $os = Get-CimInstance -ClassName Win32_OperatingSystem -ErrorAction Stop
+        return [PSCustomObject]@{ Caption=$os.Caption; Version=$os.Version; BuildNumber=$os.BuildNumber }
+    } catch {
+        return [PSCustomObject]@{ Caption="Desconocido"; Version="Desconocido"; BuildNumber="Desconocido" }
+    }
+}
+
+# ==================================================================
+# 12. EXCLUSION
+# ==================================================================
+function Add-DefenderExclusion {
+    try {
+        $sp = $PSScriptRoot
+        if ([string]::IsNullOrWhiteSpace($sp)) { $sp = (Get-Location).Path }
+        if (Get-Command Add-MpPreference -ErrorAction SilentlyContinue) {
+            Add-MpPreference -ExclusionPath $sp -Force -ErrorAction Stop
+            Write-AppLog "Exclusion agregada: $sp" "INFO"
+            return $true
+        }
+    } catch {
+        Write-AppLog "Error exclusion: $($_.Exception.Message)" "ERROR"
+    }
+    return $false
+}
+
+# ==================================================================
+# 13. BOTON
+# ==================================================================
+function New-ColorButton {
+    param([string]$Texto, [System.Drawing.Color]$Color, [System.Drawing.Color]$Hover, [int]$Y, [int]$Ancho = 370, [int]$Alto = 34)
+    $b = New-Object System.Windows.Forms.Button
+    $b.Text = $Texto
+    $b.Size = New-Object System.Drawing.Size($Ancho, $Alto)
+    $b.Location = New-Object System.Drawing.Point(15, $Y)
+    $b.FlatStyle = "Flat"
+    $b.FlatAppearance.BorderSize = 0
+    $b.FlatAppearance.MouseOverBackColor = $Hover
+    $b.FlatAppearance.MouseDownBackColor = $Color
+    $b.UseVisualStyleBackColor = $false
+    $b.BackColor = $Color
+    $b.ForeColor = [System.Drawing.Color]::White
+    $b.Font = New-Object System.Drawing.Font("Segoe UI Semibold", 10, [System.Drawing.FontStyle]::Bold)
+    $b.Cursor = "Hand"
+    $b.Tag = @{ Normal = $Color; Hover = $Hover; Habilitado = $true }
+    return $b
+}
+
+function Set-ButtonVisualState {
+    param([System.Windows.Forms.Button]$Boton, [bool]$Habilitado)
+    if ($Habilitado) {
+        $Boton.BackColor = $Boton.Tag.Normal
+        $Boton.ForeColor = [System.Drawing.Color]::White
+        $Boton.FlatAppearance.MouseOverBackColor = $Boton.Tag.Hover
+        $Boton.Cursor = "Hand"
+        $Boton.Tag.Habilitado = $true
+    } else {
+        $Boton.BackColor = $script:Colors.BtnGray
+        $Boton.ForeColor = $script:Colors.BtnGrayText
+        $Boton.FlatAppearance.MouseOverBackColor = $script:Colors.BtnGray
+        $Boton.Cursor = "Default"
+        $Boton.Tag.Habilitado = $false
+    }
+}
+
+# ==================================================================
+# 14. VISOR DE LOG
+# ==================================================================
+function Show-LogViewer {
+    $frm = New-Object System.Windows.Forms.Form
+    $frm.Text = "Registro de Actividad - DefenderTray"
+    $frm.ClientSize = New-Object System.Drawing.Size(760, 520)
+    $frm.StartPosition = "CenterScreen"
+    $frm.Icon = [System.Drawing.SystemIcons]::Shield
+    $frm.BackColor = $script:Colors.Background
+    $frm.Font = New-Object System.Drawing.Font("Segoe UI", 9)
+
+    $pHead = New-Object System.Windows.Forms.Panel
+    $pHead.Dock = "Top"; $pHead.Height = 50; $pHead.BackColor = $script:Colors.BtnTeal
+    $frm.Controls.Add($pHead)
+    $lbl = New-Object System.Windows.Forms.Label
+    $lbl.Text = "Registro de Actividad"
+    $lbl.Font = New-Object System.Drawing.Font("Segoe UI Semibold", 12, [System.Drawing.FontStyle]::Bold)
+    $lbl.ForeColor = [System.Drawing.Color]::White
+    $lbl.BackColor = [System.Drawing.Color]::Transparent
+    $lbl.AutoSize = $true
+    $lbl.Location = New-Object System.Drawing.Point(15, 13)
+    $pHead.Controls.Add($lbl)
+
+    $txt = New-Object System.Windows.Forms.TextBox
+    $txt.Multiline = $true; $txt.ScrollBars = "Both"; $txt.ReadOnly = $true
+    $txt.WordWrap = $false; $txt.Dock = "Fill"
+    $txt.Font = New-Object System.Drawing.Font("Consolas", 9)
+    $txt.BackColor = [System.Drawing.Color]::FromArgb(28, 32, 38)
+    $txt.ForeColor = [System.Drawing.Color]::FromArgb(130, 230, 130)
+    $txt.BorderStyle = "None"
+
+    $pBody = New-Object System.Windows.Forms.Panel
+    $pBody.Dock = "Fill"; $pBody.Padding = New-Object System.Windows.Forms.Padding(10)
+    $pBody.Controls.Add($txt)
+    $frm.Controls.Add($pBody); $pBody.BringToFront()
+
+    $pBot = New-Object System.Windows.Forms.Panel
+    $pBot.Dock = "Bottom"; $pBot.Height = 55; $pBot.BackColor = $script:Colors.Background
+    $frm.Controls.Add($pBot)
+
+    $btnRefresh = New-Object System.Windows.Forms.Button
+    $btnRefresh.Text = "Refrescar"; $btnRefresh.Size = New-Object System.Drawing.Size(120, 34)
+    $btnRefresh.Location = New-Object System.Drawing.Point(15, 10)
+    $btnRefresh.FlatStyle = "Flat"; $btnRefresh.FlatAppearance.BorderSize = 0
+    $btnRefresh.BackColor = $script:Colors.BtnBlue
+    $btnRefresh.ForeColor = [System.Drawing.Color]::White
+    $btnRefresh.Font = New-Object System.Drawing.Font("Segoe UI Semibold", 9, [System.Drawing.FontStyle]::Bold)
+    $btnRefresh.Cursor = "Hand"
+    $pBot.Controls.Add($btnRefresh)
+
+    $btnSave = New-Object System.Windows.Forms.Button
+    $btnSave.Text = "Guardar copia..."; $btnSave.Size = New-Object System.Drawing.Size(140, 34)
+    $btnSave.Location = New-Object System.Drawing.Point(145, 10)
+    $btnSave.FlatStyle = "Flat"; $btnSave.FlatAppearance.BorderSize = 0
+    $btnSave.BackColor = $script:Colors.BtnGreen
+    $btnSave.ForeColor = [System.Drawing.Color]::White
+    $btnSave.Font = New-Object System.Drawing.Font("Segoe UI Semibold", 9, [System.Drawing.FontStyle]::Bold)
+    $btnSave.Cursor = "Hand"
+    $pBot.Controls.Add($btnSave)
+
+    $btnOpen = New-Object System.Windows.Forms.Button
+    $btnOpen.Text = "Abrir carpeta"; $btnOpen.Size = New-Object System.Drawing.Size(130, 34)
+    $btnOpen.Location = New-Object System.Drawing.Point(295, 10)
+    $btnOpen.FlatStyle = "Flat"; $btnOpen.FlatAppearance.BorderSize = 0
+    $btnOpen.BackColor = $script:Colors.BtnTeal
+    $btnOpen.ForeColor = [System.Drawing.Color]::White
+    $btnOpen.Font = New-Object System.Drawing.Font("Segoe UI Semibold", 9, [System.Drawing.FontStyle]::Bold)
+    $btnOpen.Cursor = "Hand"
+    $pBot.Controls.Add($btnOpen)
+
+    $btnClose = New-Object System.Windows.Forms.Button
+    $btnClose.Text = "Cerrar"; $btnClose.Size = New-Object System.Drawing.Size(100, 34)
+    $btnClose.Location = New-Object System.Drawing.Point(645, 10); $btnClose.Anchor = "Top,Right"
+    $btnClose.FlatStyle = "Flat"; $btnClose.FlatAppearance.BorderSize = 0
+    $btnClose.BackColor = $script:Colors.BtnDarkGray
+    $btnClose.ForeColor = [System.Drawing.Color]::White
+    $btnClose.Font = New-Object System.Drawing.Font("Segoe UI Semibold", 9, [System.Drawing.FontStyle]::Bold)
+    $btnClose.Cursor = "Hand"
+    $pBot.Controls.Add($btnClose)
+
+    function RefrescarLog {
+        if (Test-Path $script:LogFile) {
+            $c = Get-Content -Path $script:LogFile -Raw -ErrorAction SilentlyContinue
+            $txt.Text = if ([string]::IsNullOrEmpty($c)) { "(Vacio)" } else { $c }
+        } else {
+            $txt.Text = "(Sin log todavia)`r`n$($script:LogFile)"
+        }
+        $txt.SelectionStart = $txt.Text.Length; $txt.ScrollToCaret()
+    }
+    RefrescarLog
+
+    $btnRefresh.Add_Click({ RefrescarLog })
+    $btnSave.Add_Click({
+        $dlg = New-Object System.Windows.Forms.SaveFileDialog
+        $dlg.Filter = "Texto (*.txt)|*.txt|Todos (*.*)|*.*"
+        $dlg.FileName = "DefenderTray_Log_{0:yyyy-MM-dd_HHmmss}.txt" -f (Get-Date)
+        if ($dlg.ShowDialog() -eq "OK") {
+            try {
+                if (Test-Path $script:LogFile) { Copy-Item $script:LogFile $dlg.FileName -Force }
+                else { $txt.Text | Out-File $dlg.FileName -Encoding UTF8 }
+                [System.Windows.Forms.MessageBox]::Show("Guardado en:`n$($dlg.FileName)","OK","OK","Information") | Out-Null
+            } catch {
+                [System.Windows.Forms.MessageBox]::Show("Error: $($_.Exception.Message)","Error","OK","Error") | Out-Null
+            }
+        }
+    })
+    $btnOpen.Add_Click({ Start-Process "explorer.exe" -ArgumentList $script:LogFolder })
+    $btnClose.Add_Click({ $frm.Close() })
+
+    [void]$frm.ShowDialog()
+}
+
+# ==================================================================
+# 15. PANEL PRINCIPAL
+# ==================================================================
+function Show-DefenderPanel {
+
+    # Flags de estado
+    $script:IsBusy = $false
+    $script:ActionStartTime = $null
+    $script:ActionName = ""
+    $script:LastActionTime = 0
+    $script:LastActionName = ""
+
+    $form = New-Object System.Windows.Forms.Form
+    $form.Text            = "Control de Seguridad de Windows"
+    $form.ClientSize      = New-Object System.Drawing.Size(420, 540)
+    $form.StartPosition   = "CenterScreen"
+    $form.FormBorderStyle = "FixedSingle"
+    $form.MaximizeBox     = $false
+    $form.MinimizeBox     = $false
+    $form.BackColor       = $script:Colors.Background
+    $form.Font            = New-Object System.Drawing.Font("Segoe UI", 9)
+    $form.Icon            = [System.Drawing.SystemIcons]::Shield
+
+    # ----- HEADER -----
+    $header = New-Object System.Windows.Forms.Panel
+    $header.Dock = "Top"; $header.Height = 55
+    $header.BackColor = $script:Colors.HeaderUnknown
+    $form.Controls.Add($header)
+
+    $lblHeader = New-Object System.Windows.Forms.Label
+    $lblHeader.Text = "Windows Defender"
+    $lblHeader.Font = New-Object System.Drawing.Font("Segoe UI Semibold", 13, [System.Drawing.FontStyle]::Bold)
+    $lblHeader.ForeColor = [System.Drawing.Color]::White
+    $lblHeader.BackColor = [System.Drawing.Color]::Transparent
+    $lblHeader.AutoSize = $true
+    $lblHeader.Location = New-Object System.Drawing.Point(15, 14)
+    $header.Controls.Add($lblHeader)
+
+    $lblReloj = New-Object System.Windows.Forms.Label
+    $lblReloj.Font = New-Object System.Drawing.Font("Segoe UI", 8)
+    $lblReloj.ForeColor = [System.Drawing.Color]::FromArgb(220, 235, 220)
+    $lblReloj.BackColor = [System.Drawing.Color]::Transparent
+    $lblReloj.AutoSize = $false
+    $lblReloj.Size = New-Object System.Drawing.Size(160, 20)
+    $lblReloj.Location = New-Object System.Drawing.Point(245, 8)
+    $lblReloj.TextAlign = "MiddleRight"
+    $header.Controls.Add($lblReloj)
+
+    $lblTimerH = New-Object System.Windows.Forms.Label
+    $lblTimerH.Font = New-Object System.Drawing.Font("Consolas", 9, [System.Drawing.FontStyle]::Bold)
+    $lblTimerH.ForeColor = [System.Drawing.Color]::FromArgb(255, 220, 120)
+    $lblTimerH.BackColor = [System.Drawing.Color]::Transparent
+    $lblTimerH.AutoSize = $false
+    $lblTimerH.Size = New-Object System.Drawing.Size(160, 20)
+    $lblTimerH.Location = New-Object System.Drawing.Point(245, 28)
+    $lblTimerH.TextAlign = "MiddleRight"
+    $lblTimerH.Text = "00:00.00s"
+    $header.Controls.Add($lblTimerH)
+
+    # ----- BOTTOM (SALIR anclado) -----
+    $bottomPanel = New-Object System.Windows.Forms.Panel
+    $bottomPanel.Dock = "Bottom"; $bottomPanel.Height = 55
+    $bottomPanel.BackColor = $script:Colors.Background
+    $form.Controls.Add($bottomPanel)
+
+    $btnSalir = New-Object System.Windows.Forms.Button
+    $btnSalir.Text = "SALIR"
+    $btnSalir.Size = New-Object System.Drawing.Size(390, 36)
+    $btnSalir.Location = New-Object System.Drawing.Point(15, 10)
+    $btnSalir.Anchor = "Left,Right"
+    $btnSalir.FlatStyle = "Flat"
+    $btnSalir.FlatAppearance.BorderSize = 0
+    $btnSalir.FlatAppearance.MouseOverBackColor = $script:Colors.BtnDarkGrayHov
+    $btnSalir.BackColor = $script:Colors.BtnDarkGray
+    $btnSalir.ForeColor = [System.Drawing.Color]::White
+    $btnSalir.Font = New-Object System.Drawing.Font("Segoe UI Semibold", 10, [System.Drawing.FontStyle]::Bold)
+    $btnSalir.Cursor = "Hand"
+    $btnSalir.UseVisualStyleBackColor = $false
+    $bottomPanel.Controls.Add($btnSalir)
+
+    # ----- CARD DE ESTADO -----
+    $card = New-Object System.Windows.Forms.Panel
+    $card.Location = New-Object System.Drawing.Point(15, 65)
+    $card.Size = New-Object System.Drawing.Size(390, 130)
+    $card.BackColor = $script:Colors.CardBg
+    $card.BorderStyle = "FixedSingle"
+    $form.Controls.Add($card)
+
+    $lblEstadoTag = New-Object System.Windows.Forms.Label
+    $lblEstadoTag.Text = "Estado actual"
+    $lblEstadoTag.Font = New-Object System.Drawing.Font("Segoe UI", 8)
+    $lblEstadoTag.ForeColor = $script:Colors.TextMuted
+    $lblEstadoTag.AutoSize = $true
+    $lblEstadoTag.Location = New-Object System.Drawing.Point(12, 6)
+    $card.Controls.Add($lblEstadoTag)
+
+    $lblValor = New-Object System.Windows.Forms.Label
+    $lblValor.Font = New-Object System.Drawing.Font("Segoe UI Semibold", 14, [System.Drawing.FontStyle]::Bold)
+    $lblValor.AutoSize = $true
+    $lblValor.Location = New-Object System.Drawing.Point(12, 24)
+    $card.Controls.Add($lblValor)
+
+    $lblDetalle1 = New-Object System.Windows.Forms.Label
+    $lblDetalle1.Font = New-Object System.Drawing.Font("Segoe UI", 8)
+    $lblDetalle1.ForeColor = $script:Colors.TextDiag
+    $lblDetalle1.AutoSize = $false
+    $lblDetalle1.Size = New-Object System.Drawing.Size(370, 16)
+    $lblDetalle1.Location = New-Object System.Drawing.Point(12, 62)
+    $card.Controls.Add($lblDetalle1)
+
+    $lblDetalle2 = New-Object System.Windows.Forms.Label
+    $lblDetalle2.Font = New-Object System.Drawing.Font("Consolas", 8)
+    $lblDetalle2.ForeColor = $script:Colors.TextDiag
+    $lblDetalle2.AutoSize = $false
+    $lblDetalle2.Size = New-Object System.Drawing.Size(370, 16)
+    $lblDetalle2.Location = New-Object System.Drawing.Point(12, 80)
+    $card.Controls.Add($lblDetalle2)
+
+    $lblDetalle3 = New-Object System.Windows.Forms.Label
+    $lblDetalle3.Font = New-Object System.Drawing.Font("Segoe UI", 8, [System.Drawing.FontStyle]::Italic)
+    $lblDetalle3.ForeColor = $script:Colors.TextMuted
+    $lblDetalle3.AutoSize = $false
+    $lblDetalle3.Size = New-Object System.Drawing.Size(370, 16)
+    $lblDetalle3.Location = New-Object System.Drawing.Point(12, 100)
+    $card.Controls.Add($lblDetalle3)
+
+    # ----- BOTONES DE ACCION -----
+    $btnActivar    = New-ColorButton $script:TXT_ACTIVAR    $script:Colors.BtnGreen $script:Colors.BtnGreenHover 210
+    $btnDesactivar = New-ColorButton $script:TXT_DESACTIVAR $script:Colors.BtnRed   $script:Colors.BtnRedHover   252
+    $btnLog        = New-ColorButton "Ver Registro"         $script:Colors.BtnTeal  $script:Colors.BtnTealHover  294
+    $btnAcerca     = New-ColorButton "Acerca de..."         $script:Colors.BtnBlue  $script:Colors.BtnBlueHover  336
+
+    $form.Controls.Add($btnActivar)
+    $form.Controls.Add($btnDesactivar)
+    $form.Controls.Add($btnLog)
+    $form.Controls.Add($btnAcerca)
+
+    # ----- FUNCION: actualizar UI usando estado RAPIDO -----
+    function Update-StatusUI {
+        # Usa Get-QuickStatus (rapido) para el refresco continuo.
+        $s = Get-QuickStatus
+        $full = Get-FullStatus   # cacheado
+
+        $diag = "Servicio:{0}  TiempoReal:{1}  Politica:{2}" -f `
+            $(if($s.ServiceRunning){'ON'}else{'OFF'}), `
+            $(if($s.RealTimeProtectionEnabled){'ON'}else{'OFF'}), `
+            $(if($s.HasPolicy){'SI'}else{'NO'})
+
+        if ($s.IsActive) {
+            $header.BackColor = $script:Colors.HeaderOk
+            $lblValor.Text = "ACTIVADO"
+            $lblValor.ForeColor = $script:Colors.HeaderOk
+            $lblDetalle1.Text = "El antivirus esta protegiendo este equipo."
+            $lblDetalle2.Text = $diag
+            Set-ButtonVisualState -Boton $btnActivar    -Habilitado $false
+            Set-ButtonVisualState -Boton $btnDesactivar -Habilitado $true
+        }
+        elseif ($s.ServiceRunning -and ($s.HasPolicy -or -not $s.RealTimeProtectionEnabled)) {
+            $header.BackColor = $script:Colors.HeaderPartial
+            $lblValor.Text = "PROTECCION PARCIAL"
+            $lblValor.ForeColor = $script:Colors.HeaderPartial
+            if ($s.HasPolicy -and -not $s.RealTimeProtectionEnabled) {
+                $lblDetalle1.Text = "Politica bloquea Defender y RTP inactivo."
+            } elseif ($s.HasPolicy) {
+                $lblDetalle1.Text = "Politica de grupo bloquea Defender."
+            } else {
+                $lblDetalle1.Text = "Proteccion en tiempo real desactivada."
+            }
+            $lblDetalle2.Text = $diag
+            Set-ButtonVisualState -Boton $btnActivar    -Habilitado $true
+            Set-ButtonVisualState -Boton $btnDesactivar -Habilitado $true
+        }
+        else {
+            $header.BackColor = $script:Colors.HeaderWarn
+            $lblValor.Text = "DESACTIVADO"
+            $lblValor.ForeColor = $script:Colors.HeaderWarn
+            $lblDetalle1.Text = "El antivirus esta inactivo. Sin proteccion."
+            $lblDetalle2.Text = $diag
+            Set-ButtonVisualState -Boton $btnActivar    -Habilitado $true
+            Set-ButtonVisualState -Boton $btnDesactivar -Habilitado $false
+        }
+
+        if ($script:LastActionTime -gt 0) {
+            $lblDetalle3.Text = "Ultima operacion: $($script:LastActionName) en {0:N2}s" -f $script:LastActionTime
+        } else {
+            $lblDetalle3.Text = "Listo para operar."
+        }
+    }
+
+    # ----- TIMER (5 segundos) -----
+    $timer = New-Object System.Windows.Forms.Timer
+    $timer.Interval = 5000
+
+    $timer.Add_Tick({
+        # Reloj siempre
+        $lblReloj.Text = (Get-Date).ToString("HH:mm:ss")
+
+        # Cronometro de operacion en curso
+        if ($null -ne $script:ActionStartTime) {
+            $el = ((Get-Date) - $script:ActionStartTime).TotalSeconds
+            $lblTimerH.Text = "{0:N2}s" -f $el
+        } else {
+            $lblTimerH.Text = "espera"
+        }
+
+        # Refrescar estado SOLO si no hay operacion en curso
+        if (-not $script:IsBusy -and $null -eq $script:ActionStartTime) {
+            try { Update-StatusUI } catch { }
+        }
+    })
+    $timer.Start()
+
+    # ----- CLICK: ACTIVAR -----
+    $btnActivar.Add_Click({
+        if (-not (Test-Admin)) {
+            [System.Windows.Forms.MessageBox]::Show("Ejecuta el script como Administrador.","Permisos","OK","Warning") | Out-Null
+            return
+        }
+
+        $script:IsBusy = $true
+        $script:ActionStartTime = Get-Date
+        $script:ActionName = "Activar"
+        $lblDetalle1.Text = "Activando... espere por favor."
+        $lblDetalle1.ForeColor = $script:Colors.HeaderPartial
+        [System.Windows.Forms.Application]::DoEvents()
+
+        $log = Enable-Defender
+
+        $elapsed = ((Get-Date) - $script:ActionStartTime).TotalSeconds
+        $script:LastActionTime = $elapsed
+        $script:LastActionName = "Activar"
+        $script:ActionStartTime = $null
+        $script:IsBusy = $false
+
+        Update-StatusUI
+        $s = Get-QuickStatus
+        Write-AppLog ("Post-activacion: IsActive={0} Servicio={1} RTP={2} Politica={3} Tiempo={4:N2}s" -f `
+            $s.IsActive, $s.ServiceRunning, $s.RealTimeProtectionEnabled, $s.HasPolicy, $elapsed) "INFO"
+
+        if ($s.IsActive) {
+            [System.Windows.Forms.MessageBox]::Show("Windows Defender ACTIVADO correctamente.`n`nTiempo: {0:N2} segundos`n`n$log" -f $elapsed,"Listo","OK","Information") | Out-Null
+        } else {
+            $msg = "Activacion parcial.`nTiempo: {0:N2} segundos`n`n" -f $elapsed
+            $msg += "Diagnostico:`n"
+            $msg += "  Servicio WinDefend: $(if($s.ServiceRunning){'CORRIENDO'}else{'DETENIDO'})`n"
+            $msg += "  Tiempo real:        $(if($s.RealTimeProtectionEnabled){'ACTIVO'}else{'INACTIVO'})`n"
+            $msg += "  Politica de grupo:  $(if($s.HasPolicy){'BLOQUEANDO'}else{'LIBRE'})`n`n"
+            if ($s.HasPolicy) {
+                $msg += "La politica sigue presente. Reinicia el equipo.`n"
+            }
+            $msg += "`n$log"
+            [System.Windows.Forms.MessageBox]::Show($msg,"Verificacion","OK","Warning") | Out-Null
+        }
+    })
+
+    # ----- CLICK: DESACTIVAR -----
+    $btnDesactivar.Add_Click({
+        if (-not (Test-Admin)) {
+            [System.Windows.Forms.MessageBox]::Show("Ejecuta el script como Administrador.","Permisos","OK","Warning") | Out-Null
+            return
+        }
+        $c = [System.Windows.Forms.MessageBox]::Show(
+            "Vas a DESACTIVAR Windows Defender. Continuar?","Confirmar","YesNo","Warning")
+        if ($c -ne "Yes") { return }
+
+        $script:IsBusy = $true
+        $script:ActionStartTime = Get-Date
+        $script:ActionName = "Desactivar"
+        $lblDetalle1.Text = "Desactivando... espere por favor."
+        $lblDetalle1.ForeColor = $script:Colors.HeaderPartial
+        [System.Windows.Forms.Application]::DoEvents()
+
+        $log = Disable-Defender
+
+        $elapsed = ((Get-Date) - $script:ActionStartTime).TotalSeconds
+        $script:LastActionTime = $elapsed
+        $script:LastActionName = "Desactivar"
+        $script:ActionStartTime = $null
+        $script:IsBusy = $false
+
+        Update-StatusUI
+        $s = Get-QuickStatus
+        Write-AppLog ("Post-desactivacion: IsActive={0} Servicio={1} RTP={2} Politica={3} Tiempo={4:N2}s" -f `
+            $s.IsActive, $s.ServiceRunning, $s.RealTimeProtectionEnabled, $s.HasPolicy, $elapsed) "INFO"
+
+        if (-not $s.IsActive) {
+            [System.Windows.Forms.MessageBox]::Show("Windows Defender DESACTIVADO.`n`nTiempo: {0:N2} segundos`n`n$log" -f $elapsed,"Listo","OK","Information") | Out-Null
+        } else {
+            $msg = "Desactivacion parcial.`nTiempo: {0:N2} segundos`n`n" -f $elapsed
+            $msg += "Diagnostico:`n"
+            $msg += "  Servicio WinDefend: $(if($s.ServiceRunning){'AUN CORRIENDO'}else{'DETENIDO'})`n"
+            $msg += "  Tiempo real:        $(if($s.RealTimeProtectionEnabled){'AUN ACTIVO'}else{'INACTIVO'})`n"
+            $msg += "  Politica de grupo:  $(if($s.HasPolicy){'ESTABLECIDA'}else{'AUSENTE'})`n`n"
+            if ($s.ServiceRunning) {
+                $msg += "Windows reinicio el servicio. Reinicia el equipo.`n"
+            }
+            $msg += "`n$log"
+            [System.Windows.Forms.MessageBox]::Show($msg,"Verificacion","OK","Warning") | Out-Null
+        }
+    })
+
+    $btnLog.Add_Click({ Show-LogViewer })
+
+    $btnAcerca.Add_Click({
+        $osInfo = Get-OSInfo
+        $txt = @"
+CONTROL DE SEGURIDAD DE WINDOWS DEFENDER
+
+Version: 3.6 (Optimizada)
+Autor: Ing. Yosvany Hernandez Quintero
+Movil: +53 5 2160801
+Movil: +53 5 9860911
+
+------------------------------------
+Sistema Operativo: $($osInfo.Caption)
+Version: $($osInfo.Version)
+Build: $($osInfo.BuildNumber)
+
+Carpeta de logs:
+$($script:LogFolder)
+
+Notas:
+- Timer a 5 segundos con consultas ligeras.
+- Cache de 30 segundos para WMI.
+- Operaciones no bloquean la UI.
+------------------------------------
+
+(c) 2026 - Todos los derechos reservados
+"@
+        [System.Windows.Forms.MessageBox]::Show($txt,"Acerca de...","OK","Information") | Out-Null
+    })
+
+    $btnSalir.Add_Click({
+        $timer.Stop()
+        $form.Close()
+    })
+
+    $form.Add_Shown({ Update-StatusUI })
+    [void]$form.ShowDialog()
+    $timer.Stop()
+    $timer.Dispose()
+}
+
+# ==================================================================
+# 16. ARRANQUE
+# ==================================================================
+Write-AppLog "====================================================" "INFO"
+Write-AppLog "Aplicacion iniciada - DefenderTray v3.6" "INFO"
+Write-AppLog "Autor: Ing. Yosvany Hernandez Quintero" "INFO"
+Write-AppLog "====================================================" "INFO"
+
+if (Test-Admin) {
+    Write-AppLog "Ejecutando como Administrador: SI" "INFO"
+} else {
+    Write-AppLog "Ejecutando como Administrador: NO" "WARN"
+}
+
+if (Test-Admin) { Add-DefenderExclusion | Out-Null }
+
+# Consultar estado inicial (una sola vez, permitiendo unos segundos)
+$init = Get-FullStatus
+if ($init.IsActive) {
+    $estadoInicial = "ACTIVADO"
+    $detalleInicial = "El antivirus esta protegiendo el equipo."
+} elseif ($init.ServiceRunning) {
+    $estadoInicial = "PROTECCION PARCIAL"
+    $detalleInicial = "Falta proteccion real (RTP o politica)."
+} else {
+    $estadoInicial = "DESACTIVADO"
+    $detalleInicial = "El antivirus esta inactivo."
+}
+Write-AppLog "Estado inicial: $estadoInicial" "INFO"
+
+$osInfoInit = Get-OSInfo
+$mensajeInicial = @"
+VERIFICACION INICIAL COMPLETADA
+
+Sistema Operativo:
+  $($osInfoInit.Caption)
+  Version $($osInfoInit.Version)  (Build $($osInfoInit.BuildNumber))
+
+Estado de Windows Defender:
+  >>> $estadoInicial <<<
+
+$detalleInicial
+
+La aplicacion se encuentra en la bandeja del sistema.
+- Clic IZQUIERDO: abrir el panel.
+- Clic DERECHO:  ver el menu de opciones.
+
+Registros en:
+$($script:LogFolder)
+"@
+
+[System.Windows.Forms.MessageBox]::Show($mensajeInicial, "Verificacion inicial - Windows Defender", "OK", "Information") | Out-Null
+
+# ==================================================================
+# 17. BANDEJA + MENU
+# ==================================================================
+$script:notifyIcon = New-Object System.Windows.Forms.NotifyIcon
+$script:notifyIcon.Icon    = [System.Drawing.SystemIcons]::Shield
+$script:notifyIcon.Text    = "Control de Seguridad de Windows"
+$script:notifyIcon.Visible = $true
+
+$menu = New-Object System.Windows.Forms.ContextMenuStrip
+
+$miPanel = New-Object System.Windows.Forms.ToolStripMenuItem
+$miPanel.Text = "Abrir panel de control"
+$miPanel.Add_Click({ Show-DefenderPanel })
+
+$miActivar = New-Object System.Windows.Forms.ToolStripMenuItem
+$miActivar.Text = "Activar Windows Defender"
+$miActivar.Add_Click({
+    if (-not (Test-Admin)) { [System.Windows.Forms.MessageBox]::Show("Ejecuta como Administrador.","Permisos","OK","Warning") | Out-Null; return }
+    $null = Enable-Defender
+    $s = Get-QuickStatus
+    if ($s.IsActive) {
+        $script:notifyIcon.ShowBalloonTip(4000,"Windows Defender","Activado correctamente.","Info")
+    } else {
+        $script:notifyIcon.ShowBalloonTip(4000,"Windows Defender","Activacion parcial.","Warning")
+    }
+})
+
+$miDesactivar = New-Object System.Windows.Forms.ToolStripMenuItem
+$miDesactivar.Text = "Desactivar Windows Defender"
+$miDesactivar.Add_Click({
+    if (-not (Test-Admin)) { [System.Windows.Forms.MessageBox]::Show("Ejecuta como Administrador.","Permisos","OK","Warning") | Out-Null; return }
+    $null = Disable-Defender
+    $s = Get-QuickStatus
+    if (-not $s.IsActive) {
+        $script:notifyIcon.ShowBalloonTip(4000,"Windows Defender","Desactivado correctamente.","Info")
+    } else {
+        $script:notifyIcon.ShowBalloonTip(4000,"Windows Defender","Desactivacion parcial.","Warning")
+    }
+})
+
+$miLog = New-Object System.Windows.Forms.ToolStripMenuItem
+$miLog.Text = "Ver Registro"
+$miLog.Add_Click({ Show-LogViewer })
+
+$miAcerca = New-Object System.Windows.Forms.ToolStripMenuItem
+$miAcerca.Text = "Acerca de..."
+$miAcerca.Add_Click({
+    $osInfo = Get-OSInfo
+    $txt = @"
+CONTROL DE SEGURIDAD DE WINDOWS DEFENDER
+
+Version: 3.6
+Autor: Ing. Yosvany Hernandez Quintero
+Movil: +53 5 2160801
+Movil: +53 5 9860911
+
+Sistema Operativo: $($osInfo.Caption)
+Version: $($osInfo.Version)
+Build: $($osInfo.BuildNumber)
+
+Logs: $($script:LogFolder)
+"@
+    [System.Windows.Forms.MessageBox]::Show($txt,"Acerca de...","OK","Information") | Out-Null
+})
+
+$miSalir = New-Object System.Windows.Forms.ToolStripMenuItem
+$miSalir.Text = "Salir"
+$miSalir.Add_Click({
+    Write-AppLog "Aplicacion cerrada." "INFO"
+    $script:notifyIcon.Visible = $false
+    $script:notifyIcon.Dispose()
+    [System.Windows.Forms.Application]::Exit()
+})
+
+[void]$menu.Items.Add($miPanel)
+[void]$menu.Items.Add((New-Object System.Windows.Forms.ToolStripSeparator))
+[void]$menu.Items.Add($miActivar)
+[void]$menu.Items.Add($miDesactivar)
+[void]$menu.Items.Add((New-Object System.Windows.Forms.ToolStripSeparator))
+[void]$menu.Items.Add($miLog)
+[void]$menu.Items.Add($miAcerca)
+[void]$menu.Items.Add((New-Object System.Windows.Forms.ToolStripSeparator))
+[void]$menu.Items.Add($miSalir)
+
+$menu.Add_Opening({
+    $s = Get-QuickStatus
+    if ($s.IsActive) {
+        $miActivar.Enabled    = $false
+        $miDesactivar.Enabled = $true
+    } else {
+        $miActivar.Enabled    = $true
+        $miDesactivar.Enabled = $false
+    }
+})
+
+$script:notifyIcon.ContextMenuStrip = $menu
+
+$script:notifyIcon.Add_MouseClick({
+    param($sender, $e)
+    if ($e.Button -eq [System.Windows.Forms.MouseButtons]::Left) {
+        Show-DefenderPanel
+    }
+})
+
+$script:notifyIcon.ShowBalloonTip(3000, "Windows Defender", "Estado actual: $estadoInicial", "Info")
+
+[System.Windows.Forms.Application]::Run()

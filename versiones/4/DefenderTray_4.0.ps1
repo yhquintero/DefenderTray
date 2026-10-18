@@ -1,0 +1,2366 @@
+<#
+.SYNOPSIS
+    Control de Seguridad de Windows Defender - Edicion Futurista.
+.DESCRIPTION
+    Version 4.0 - Todas las mejoras profesionales integradas.
+    Incluye: scheduler, perfiles, backup/restore, chart, eventos, kiosco,
+    autodiagnostico, modo portable, toast, integridad, multi-idioma.
+.NOTES
+    Ejecutar como Administrador.
+    Creado por: Ing. Yosvany Hernandez Quintero
+    Movil: +53 5 2160801 / +53 5 9860911
+    Version: 4.0
+#>
+
+# ==================================================================
+# 1. ENSAMBLADOS
+# ==================================================================
+Add-Type -AssemblyName System.Windows.Forms
+Add-Type -AssemblyName System.Drawing
+Add-Type -AssemblyName System.Windows.Forms.DataVisualization -ErrorAction SilentlyContinue
+
+# ==================================================================
+# 2. ARGUMENTOS Y RUTA
+# ==================================================================
+$script:SilentMode   = ($args -contains "-silent")
+$script:PortableMode = ($args -contains "-portable")
+
+$script:ScriptPath = $PSCommandPath
+if ([string]::IsNullOrWhiteSpace($script:ScriptPath)) { $script:ScriptPath = $MyInvocation.MyCommand.Path }
+$script:ScriptDir  = if ($script:ScriptPath) { Split-Path -Parent $script:ScriptPath } else { (Get-Location).Path }
+
+# ==================================================================
+# 3. TEXTOS (con tilde via char code para ASCII puro)
+# ==================================================================
+$script:O_ACCENT       = [char]0x00D3
+$script:TXT_PROTECCION = "PROTECCI" + $script:O_ACCENT + "N"
+$script:TXT_ACTIVAR    = "ACTIVAR " + $script:TXT_PROTECCION
+$script:TXT_DESACTIVAR = "DESACTIVAR " + $script:TXT_PROTECCION
+
+# ==================================================================
+# 4. CONFIGURACION Y RUTAS
+# ==================================================================
+if ($script:PortableMode) {
+    $script:ConfigDir = Join-Path $script:ScriptDir "DefenderTrayData"
+} else {
+    $script:ConfigDir = Join-Path $env:LOCALAPPDATA "DefenderTray"
+}
+$script:LogFolder   = Join-Path $script:ConfigDir "Logs"
+$script:BackupDir   = Join-Path $script:ConfigDir "Backups"
+$script:LogFile     = Join-Path $script:LogFolder ("DefenderTray_{0:yyyy-MM-dd}.log" -f (Get-Date))
+$script:CsvFile     = Join-Path $script:LogFolder ("DefenderTray_Eventos_{0:yyyy-MM-dd}.csv" -f (Get-Date))
+$script:ConfigFile  = Join-Path $script:ConfigDir "config.json"
+$script:HistoryFile = Join-Path $script:ConfigDir "historial_diario.json"
+
+foreach ($d in @($script:ConfigDir, $script:LogFolder, $script:BackupDir)) {
+    if (-not (Test-Path $d)) { New-Item -Path $d -ItemType Directory -Force | Out-Null }
+}
+
+# ==================================================================
+# 5. IDIOMA (i18n basico ES/EN)
+# ==================================================================
+$script:Lang = "ES"
+$script:Strings = @{
+    ES = @{
+        Title="Control de Seguridad de Windows"; Activar="ACTIVAR PROTECCION"; Desactivar="DESACTIVAR PROTECCION"
+        Verificar="VERIFICAR ESTADO"; Historial="Historial"; Perfiles="Perfiles"
+        Programar="Programador"; Backup="Backup"; Firmas="Actualizar Firmas"
+        Eventos="Eventos"; Chart="Estadisticas"; Diagnostico="Diagnostico"
+        Ayuda="Ayuda (F1)"; Config="Configuracion"; Acerca="Acerca de"; Salir="SALIR"
+        Listo="Listo para operar."; Activo="ACTIVADO"; Parcial="PROTECCION PARCIAL"; Desactivado="DESACTIVADO"
+    }
+    EN = @{
+        Title="Windows Security Control"; Activar="ENABLE PROTECTION"; Desactivar="DISABLE PROTECTION"
+        Verificar="VERIFY STATE"; Historial="History"; Perfiles="Profiles"
+        Programar="Scheduler"; Backup="Backup"; Firmas="Update Signatures"
+        Eventos="Events"; Chart="Statistics"; Diagnostico="Diagnostics"
+        Ayuda="Help (F1)"; Config="Settings"; Acerca="About"; Salir="EXIT"
+        Listo="Ready."; Activo="ENABLED"; Parcial="PARTIAL PROTECTION"; Desactivado="DISABLED"
+    }
+}
+function T { param([string]$Key); return $script:Strings[$script:Lang][$Key] }
+
+# ==================================================================
+# 6. LOG
+# ==================================================================
+function Write-AppLog {
+    param([string]$Mensaje, [string]$Nivel = "INFO")
+    try {
+        $linea = "[{0:yyyy-MM-dd HH:mm:ss}] [{1}] {2}" -f (Get-Date), $Nivel, $Mensaje
+        Add-Content -Path $script:LogFile -Value $linea -Encoding UTF8 -ErrorAction SilentlyContinue
+    } catch { }
+}
+
+# ==================================================================
+# 7. INTEGRIDAD
+# ==================================================================
+$script:ScriptHash = ""
+function Test-ScriptIntegrity {
+    try {
+        if (Test-Path $script:ScriptPath) {
+            $hash = Get-FileHash -Path $script:ScriptPath -Algorithm SHA256 -ErrorAction Stop
+            $script:ScriptHash = $hash.Hash.Substring(0, 16)
+            return $true
+        }
+    } catch { }
+    return $false
+}
+
+# ==================================================================
+# 8. CONFIG JSON
+# ==================================================================
+$script:AppConfig = @{
+    Version      = "4.0"
+    DarkTheme    = $true
+    Lang         = "ES"
+    AutoStart    = $false
+    KioskMode    = $false
+    KioskHash    = ""
+    FollowSystem = $true
+    FirstRunDone = $false
+    LastProfile  = "Personalizado"
+}
+function Load-AppConfig {
+    try {
+        if (Test-Path $script:ConfigFile) {
+            $json = Get-Content $script:ConfigFile -Raw -ErrorAction Stop | ConvertFrom-Json
+            foreach ($p in $json.PSObject.Properties) {
+                if ($script:AppConfig.ContainsKey($p.Name)) { $script:AppConfig[$p.Name] = $p.Value }
+            }
+        }
+    } catch { }
+    $script:DarkTheme    = [bool]$script:AppConfig.DarkTheme
+    $script:Lang         = $script:AppConfig.Lang
+    $script:IsKioskMode  = [bool]$script:AppConfig.KioskMode
+}
+function Save-AppConfig {
+    try {
+        $script:AppConfig.DarkTheme = $script:DarkTheme
+        $script:AppConfig.Lang      = $script:Lang
+        $script:AppConfig.KioskMode = $script:IsKioskMode
+        $script:AppConfig | ConvertTo-Json -Depth 5 | Set-Content -Path $script:ConfigFile -Encoding UTF8 -Force
+    } catch { }
+}
+
+# ==================================================================
+# 9. HISTORIAL
+# ==================================================================
+$script:EventHistory = New-Object System.Collections.ArrayList
+
+function Add-History {
+    param([string]$Accion, [string]$Resultado, [double]$Segundos = 0)
+    $entry = [PSCustomObject]@{ Hora=(Get-Date); Accion=$Accion; Resultado=$Resultado; Segundos=$Segundos }
+    [void]$script:EventHistory.Insert(0, $entry)
+    while ($script:EventHistory.Count -gt 20) { $script:EventHistory.RemoveAt($script:EventHistory.Count - 1) }
+    try {
+        if (-not (Test-Path $script:CsvFile)) {
+            Add-Content -Path $script:CsvFile -Value '"Fecha","Accion","Resultado","Segundos"' -Encoding UTF8
+        }
+        Add-Content -Path $script:CsvFile -Value ('"{0:yyyy-MM-dd HH:mm:ss}","{1}","{2}","{3:N2}"' -f $entry.Hora, $Accion, $Resultado, $Segundos) -Encoding UTF8 -ErrorAction SilentlyContinue
+        $script:EventHistory | ConvertTo-Json -Depth 3 | Set-Content -Path $script:HistoryFile -Encoding UTF8 -Force
+    } catch { }
+}
+
+function Load-History {
+    try {
+        if (Test-Path $script:HistoryFile) {
+            $data = Get-Content $script:HistoryFile -Raw -ErrorAction Stop | ConvertFrom-Json
+            if ($data -is [array]) {
+                foreach ($e in $data) { [void]$script:EventHistory.Add([PSCustomObject]@{ Hora=[DateTime]$e.Hora; Accion=$e.Accion; Resultado=$e.Resultado; Segundos=[double]$e.Segundos }) }
+            }
+        }
+    } catch { }
+}
+
+# ==================================================================
+# 10. ESPERA NO BLOQUEANTE
+# ==================================================================
+function Wait-WithDoEvents {
+    param([int]$Milliseconds)
+    $end = (Get-Date).AddMilliseconds($Milliseconds)
+    while ((Get-Date) -lt $end) {
+        try { [System.Windows.Forms.Application]::DoEvents() } catch { }
+        Start-Sleep -Milliseconds 50
+    }
+}
+
+# ==================================================================
+# 11. PALETA FUTURISTA (Dark + Neón)
+# ==================================================================
+function Get-FuturisticPalette {
+    return @{
+        Bg          = [System.Drawing.Color]::FromArgb(10, 14, 26)
+        BgSecondary = [System.Drawing.Color]::FromArgb(20, 27, 46)
+        CardBg      = [System.Drawing.Color]::FromArgb(24, 32, 52)
+        CardBorder  = [System.Drawing.Color]::FromArgb(0, 180, 220)
+        Text        = [System.Drawing.Color]::FromArgb(224, 230, 240)
+        TextMuted   = [System.Drawing.Color]::FromArgb(107, 122, 153)
+        TextDiag    = [System.Drawing.Color]::FromArgb(180, 200, 220)
+        AccentCyan  = [System.Drawing.Color]::FromArgb(0, 229, 255)
+        AccentCyanH = [System.Drawing.Color]::FromArgb(0, 180, 200)
+        AccentPurple= [System.Drawing.Color]::FromArgb(177, 78, 255)
+        AccentPurpH = [System.Drawing.Color]::FromArgb(140, 60, 200)
+        AccentGreen = [System.Drawing.Color]::FromArgb(0, 255, 136)
+        AccentGreenH= [System.Drawing.Color]::FromArgb(0, 200, 108)
+        AccentRed   = [System.Drawing.Color]::FromArgb(255, 51, 102)
+        AccentRedH  = [System.Drawing.Color]::FromArgb(200, 40, 80)
+        AccentAmber = [System.Drawing.Color]::FromArgb(255, 170, 0)
+        AccentAmberH= [System.Drawing.Color]::FromArgb(200, 130, 0)
+        AccentBlue  = [System.Drawing.Color]::FromArgb(0, 140, 255)
+        AccentBlueH = [System.Drawing.Color]::FromArgb(0, 110, 200)
+        BtnDisabled = [System.Drawing.Color]::FromArgb(45, 55, 75)
+        BtnDisabledT= [System.Drawing.Color]::FromArgb(100, 115, 140)
+        HeaderOk    = [System.Drawing.Color]::FromArgb(0, 200, 100)
+        HeaderWarn  = [System.Drawing.Color]::FromArgb(220, 40, 80)
+        HeaderPart  = [System.Drawing.Color]::FromArgb(220, 140, 0)
+        HeaderUnk   = [System.Drawing.Color]::FromArgb(60, 70, 90)
+        Ok          = [System.Drawing.Color]::FromArgb(0, 255, 136)
+        Bad         = [System.Drawing.Color]::FromArgb(255, 51, 102)
+        Warn        = [System.Drawing.Color]::FromArgb(255, 170, 0)
+        Neutral     = [System.Drawing.Color]::FromArgb(150, 165, 185)
+        GridLine    = [System.Drawing.Color]::FromArgb(40, 50, 75)
+    }
+}
+function Get-LightPalette {
+    return @{
+        Bg=[System.Drawing.Color]::FromArgb(240,245,250); BgSecondary=[System.Drawing.Color]::FromArgb(255,255,255)
+        CardBg=[System.Drawing.Color]::White; CardBorder=[System.Drawing.Color]::FromArgb(0,140,180)
+        Text=[System.Drawing.Color]::FromArgb(20,30,50); TextMuted=[System.Drawing.Color]::FromArgb(100,115,140)
+        TextDiag=[System.Drawing.Color]::FromArgb(60,80,105)
+        AccentCyan=[System.Drawing.Color]::FromArgb(0,150,200); AccentCyanH=[System.Drawing.Color]::FromArgb(0,120,160)
+        AccentPurple=[System.Drawing.Color]::FromArgb(120,60,200); AccentPurpH=[System.Drawing.Color]::FromArgb(90,45,160)
+        AccentGreen=[System.Drawing.Color]::FromArgb(20,180,90); AccentGreenH=[System.Drawing.Color]::FromArgb(15,145,70)
+        AccentRed=[System.Drawing.Color]::FromArgb(220,45,80); AccentRedH=[System.Drawing.Color]::FromArgb(180,35,65)
+        AccentAmber=[System.Drawing.Color]::FromArgb(220,140,0); AccentAmberH=[System.Drawing.Color]::FromArgb(180,110,0)
+        AccentBlue=[System.Drawing.Color]::FromArgb(0,110,220); AccentBlueH=[System.Drawing.Color]::FromArgb(0,85,180)
+        BtnDisabled=[System.Drawing.Color]::FromArgb(210,210,210); BtnDisabledT=[System.Drawing.Color]::FromArgb(130,130,130)
+        HeaderOk=[System.Drawing.Color]::FromArgb(20,170,80); HeaderWarn=[System.Drawing.Color]::FromArgb(200,40,70)
+        HeaderPart=[System.Drawing.Color]::FromArgb(200,130,0); HeaderUnk=[System.Drawing.Color]::FromArgb(80,90,110)
+        Ok=[System.Drawing.Color]::FromArgb(20,170,80); Bad=[System.Drawing.Color]::FromArgb(200,40,70)
+        Warn=[System.Drawing.Color]::FromArgb(200,130,0); Neutral=[System.Drawing.Color]::FromArgb(100,110,130)
+        GridLine=[System.Drawing.Color]::FromArgb(220,225,235)
+    }
+}
+
+Load-AppConfig
+$script:Colors = if ($script:DarkTheme) { Get-FuturisticPalette } else { Get-LightPalette }
+function Refresh-Palette { $script:Colors = if ($script:DarkTheme) { Get-FuturisticPalette } else { Get-LightPalette } }
+
+# ==================================================================
+# 12. ESTADO RAPIDO
+# ==================================================================
+function Test-DefenderPolicyDisabled {
+    $regPath = "HKLM:\SOFTWARE\Policies\Microsoft\Windows Defender"
+    try {
+        if (-not (Test-Path $regPath)) { return $false }
+        $props = Get-ItemProperty -Path $regPath -ErrorAction SilentlyContinue
+        if ($null -ne $props) {
+            if ($null -ne $props.DisableAntiSpyware -and [int]$props.DisableAntiSpyware -eq 1) { return $true }
+            if ($null -ne $props.DisableAntiVirus   -and [int]$props.DisableAntiVirus   -eq 1) { return $true }
+        }
+        $rt = Join-Path $regPath "Real-Time Protection"
+        if (Test-Path $rt) {
+            $r = Get-ItemProperty -Path $rt -ErrorAction SilentlyContinue
+            if ($null -ne $r) {
+                foreach ($n in @("DisableRealtimeMonitoring","DisableBehaviorMonitoring","DisableOnAccessProtection",
+                                 "DisableScanOnRealtimeEnable","DisableIOAVProtection","DisableScriptScanning")) {
+                    if ($null -ne $r.$n -and [int]$r.$n -eq 1) { return $true }
+                }
+            }
+        }
+    } catch { }
+    return $false
+}
+function Test-RTPDisabled {
+    foreach ($p in @("HKLM:\SOFTWARE\Policies\Microsoft\Windows Defender\Real-Time Protection",
+                     "HKLM:\SOFTWARE\Microsoft\Windows Defender\Real-Time Protection")) {
+        if (Test-Path $p) {
+            $v = Get-ItemProperty -Path $p -ErrorAction SilentlyContinue
+            if ($null -ne $v -and $null -ne $v.DisableRealtimeMonitoring -and [int]$v.DisableRealtimeMonitoring -eq 1) { return $true }
+        }
+    }
+    return $false
+}
+function Get-QuickStatus {
+    $svc = Get-Service -Name WinDefend -ErrorAction SilentlyContinue
+    $running = ($null -ne $svc) -and ($svc.Status -eq 'Running')
+    $rtpDisabled = Test-RTPDisabled
+    $hasPolicy = Test-DefenderPolicyDisabled
+    $isActive = $running -and (-not $rtpDisabled) -and (-not $hasPolicy)
+    $estado = if ($isActive) { "ACTIVO" } elseif (-not $running) { "DESACTIVADO" } else { "PARCIAL" }
+    return [PSCustomObject]@{ ServiceRunning=$running; RealTimeProtectionEnabled=-not $rtpDisabled; HasPolicy=$hasPolicy; IsActive=$isActive; Estado=$estado }
+}
+function Clear-StatusCache { $script:CachedFullStatus = $null; $script:CachedFullStatusTime = [DateTime]::MinValue }
+
+# ==================================================================
+# 13. INFORME COMPLETO
+# ==================================================================
+function Get-SafeProp { param($Obj,[string]$Name); try { $v = $Obj.$Name; if ($null -eq $v) { return "(n/d)" }; return $v } catch { return "(n/d)" } }
+function Get-ColorForBool { param($Value); if ($Value -eq $true) { return $script:Colors.Ok }; if ($Value -eq $false) { return $script:Colors.Bad }; return $script:Colors.Neutral }
+
+function Get-CompleteDefenderReport {
+    $report = New-Object System.Collections.ArrayList
+    $svc = Get-Service -Name WinDefend -ErrorAction SilentlyContinue
+    if ($null -ne $svc) {
+        $c = if ($svc.Status -eq 'Running') { $script:Colors.Ok } else { $script:Colors.Bad }
+        [void]$report.Add([PSCustomObject]@{ Modulo="Servicio WinDefend"; Valor=$svc.Status; Color=$c })
+    }
+    if (Get-Command Get-MpComputerStatus -ErrorAction SilentlyContinue) {
+        try {
+            $st = Get-MpComputerStatus -ErrorAction Stop
+            [void]$report.Add([PSCustomObject]@{ Modulo="Antivirus habilitado"; Valor=(Get-SafeProp $st "AntivirusEnabled"); Color=(Get-ColorForBool $st.AntivirusEnabled) })
+            [void]$report.Add([PSCustomObject]@{ Modulo="Antispyware habilitado"; Valor=(Get-SafeProp $st "AntispywareEnabled"); Color=(Get-ColorForBool $st.AntispywareEnabled) })
+            [void]$report.Add([PSCustomObject]@{ Modulo="Servicio AM"; Valor=(Get-SafeProp $st "AMServiceEnabled"); Color=(Get-ColorForBool $st.AMServiceEnabled) })
+            [void]$report.Add([PSCustomObject]@{ Modulo="Proteccion tiempo real"; Valor=(Get-SafeProp $st "RealTimeProtectionEnabled"); Color=(Get-ColorForBool $st.RealTimeProtectionEnabled) })
+            [void]$report.Add([PSCustomObject]@{ Modulo="Monitor comportamiento"; Valor=(Get-SafeProp $st "BehaviorMonitorEnabled"); Color=(Get-ColorForBool $st.BehaviorMonitorEnabled) })
+            [void]$report.Add([PSCustomObject]@{ Modulo="IOAV Protection"; Valor=(Get-SafeProp $st "IoavProtectionEnabled"); Color=(Get-ColorForBool $st.IoavProtectionEnabled) })
+            [void]$report.Add([PSCustomObject]@{ Modulo="On-Access Protection"; Valor=(Get-SafeProp $st "OnAccessProtectionEnabled"); Color=(Get-ColorForBool $st.OnAccessProtectionEnabled) })
+            [void]$report.Add([PSCustomObject]@{ Modulo="Inspeccion red (NIS)"; Valor=(Get-SafeProp $st "NISEnabled"); Color=(Get-ColorForBool $st.NISEnabled) })
+            [void]$report.Add([PSCustomObject]@{ Modulo="Tamper Protection"; Valor=(Get-SafeProp $st "IsTamperProtected"); Color=(Get-ColorForBool $st.IsTamperProtected) })
+            [void]$report.Add([PSCustomObject]@{ Modulo="Version motor"; Valor=(Get-SafeProp $st "AMEngineVersion"); Color=$null })
+            [void]$report.Add([PSCustomObject]@{ Modulo="Version firma"; Valor=(Get-SafeProp $st "AntivirusSignatureVersion"); Color=$null })
+            [void]$report.Add([PSCustomObject]@{ Modulo="Edad firma (dias)"; Valor=(Get-SafeProp $st "AntivirusSignatureAge"); Color=$null })
+        } catch { }
+    }
+    if (Get-Command Get-MpPreference -ErrorAction SilentlyContinue) {
+        try {
+            $p = Get-MpPreference -ErrorAction Stop
+            $maps = switch ([int]$p.MAPSReporting) { 0 {"Desactivado"} 1 {"Basico"} 2 {"Avanzado"} default {"Desconocido"} }
+            $mc = if ([int]$p.MAPSReporting -eq 2) { $script:Colors.Ok } else { $script:Colors.Warn }
+            [void]$report.Add([PSCustomObject]@{ Modulo="Nube (MAPS)"; Valor=$maps; Color=$mc })
+            $sm = switch ([int]$p.SubmitSamplesConsent) { 0 {"Preguntar"} 1 {"Enviar seguras"} 2 {"Nunca"} 3 {"Siempre"} default {"?"} }
+            $sc = if ([int]$p.SubmitSamplesConsent -in 1,3) { $script:Colors.Ok } else { $script:Colors.Warn }
+            [void]$report.Add([PSCustomObject]@{ Modulo="Envio muestras"; Valor=$sm; Color=$sc })
+        } catch { }
+    }
+    $hp = Test-DefenderPolicyDisabled
+    $pc = if ($hp) { $script:Colors.Bad } else { $script:Colors.Ok }
+    [void]$report.Add([PSCustomObject]@{ Modulo="Politica bloqueante"; Valor=$(if($hp){"SI"}else{"NO"}); Color=$pc })
+    return $report
+}
+
+# ==================================================================
+# 14. AUTODIAGNOSTICO
+# ==================================================================
+function Get-DiagnosticReport {
+    $r = New-Object System.Collections.ArrayList
+    function Add-D($Item,$Status,$Detail,$Color) {
+        [void]$r.Add([PSCustomObject]@{Item=$Item; Status=$Status; Detail=$Detail; Color=$Color})
+    }
+    # PowerShell
+    $pv = $PSVersionTable.PSVersion
+    if ($pv.Major -ge 5) { Add-D "PowerShell" "OK" "$($pv.Major).$($pv.Minor)" $script:Colors.Ok }
+    else { Add-D "PowerShell" "FALLA" "$($pv.Major).$($pv.Minor) - se requiere 5.1+" $script:Colors.Bad }
+    # .NET
+    try { $nv = (Get-ItemProperty "HKLM:\SOFTWARE\Microsoft\NET Framework Setup\NDP\v4\Full" -ErrorAction Stop).Version; Add-D ".NET Framework" "OK" $nv $script:Colors.Ok }
+    catch { Add-D ".NET Framework" "AVISO" "No detectado" $script:Colors.Warn }
+    # Admin
+    if (Test-Admin) { Add-D "Permisos" "OK" "Administrador" $script:Colors.Ok }
+    else { Add-D "Permisos" "FALLA" "No es Administrador" $script:Colors.Bad }
+    # Servicio WMI
+    try { $null = Get-CimInstance Win32_OperatingSystem -ErrorAction Stop; Add-D "WMI" "OK" "Funcionando" $script:Colors.Ok }
+    catch { Add-D "WMI" "FALLA" "No responde" $script:Colors.Bad }
+    # Espacio en C:
+    try {
+        $d = Get-PSDrive C -ErrorAction Stop
+        $freeGB = [math]::Round($d.Free / 1GB, 1)
+        if ($freeGB -gt 5) { Add-D "Disco C:" "OK" "$freeGB GB libres" $script:Colors.Ok }
+        else { Add-D "Disco C:" "AVISO" "$freeGB GB libres" $script:Colors.Warn }
+    } catch { Add-D "Disco C:" "AVISO" "No disponible" $script:Colors.Warn }
+    # ExecutionPolicy
+    try {
+        $ep = Get-ExecutionPolicy
+        Add-D "ExecutionPolicy" "INFO" "$ep" $script:Colors.TextDiag
+    } catch { }
+    # Integridad
+    if (Test-ScriptIntegrity) { Add-D "Integridad SHA256" "OK" $script:ScriptHash $script:Colors.Ok }
+    else { Add-D "Integridad" "AVISO" "No verificable" $script:Colors.Warn }
+    # Antivirus terceros
+    try {
+        $av = Get-CimInstance -Namespace root\SecurityCenter2 -ClassName AntiVirusProduct -ErrorAction Stop
+        if ($av) { Add-D "AV de terceros" "INFO" "$($av.Count) detectado(s)" $script:Colors.TextDiag }
+        else { Add-D "AV de terceros" "OK" "Ninguno" $script:Colors.Ok }
+    } catch { }
+    return $r
+}
+
+# ==================================================================
+# 15. PERFILES PREDEFINIDOS
+# ==================================================================
+function Get-Profiles {
+    return @{
+        "Gaming" = @{
+            Descripcion = "Desactiva RTP y notificaciones. Mantiene el resto activo."
+            RTP=$false; Notifications=$false; MAPS="Advanced"; Samples=1; Tamper=$true
+        }
+        "Desarrollo" = @{
+            Descripcion = "Excluye carpetas de trabajo. Todo lo demas activo."
+            RTP=$true; Notifications=$false; MAPS="Advanced"; Samples=3; Tamper=$true
+            Exclusiones=@("$env:USERPROFILE\source","$env:USERPROFILE\Documents\Proyectos","C:\Dev")
+        }
+        "Maxima Seguridad" = @{
+            Descripcion = "Todo activado. MAPS Advanced + Samples + Tamper."
+            RTP=$true; Notifications=$true; MAPS="Advanced"; Samples=1; Tamper=$true
+        }
+        "Personalizado" = @{
+            Descripcion = "Configuracion manual actual."
+            RTP=$null; Notifications=$null; MAPS=$null; Samples=$null; Tamper=$null
+        }
+    }
+}
+function Apply-Profile {
+    param([string]$Nombre)
+    $profiles = Get-Profiles
+    if (-not $profiles.ContainsKey($Nombre)) { return "Perfil no encontrado." }
+    $p = $profiles[$Nombre]
+    $log = New-Object System.Collections.ArrayList
+    [void]$log.Add("Aplicando perfil: $Nombre")
+    [void]$log.Add("Descripcion: $($p.Descripcion)")
+    try {
+        if ($null -ne $p.RTP -and (Get-Command Set-MpPreference -ErrorAction SilentlyContinue)) {
+            Set-MpPreference -DisableRealtimeMonitoring (-not [bool]$p.RTP) -Force -ErrorAction SilentlyContinue
+            [void]$log.Add("  RTP: $(if($p.RTP){'ACTIVADO'}else{'DESACTIVADO'})")
+        }
+        if ($null -ne $p.MAPS -and (Get-Command Set-MpPreference -ErrorAction SilentlyContinue)) {
+            Set-MpPreference -MAPSReporting $p.MAPS -Force -ErrorAction SilentlyContinue
+            [void]$log.Add("  MAPS: $($p.MAPS)")
+        }
+        if ($null -ne $p.Samples -and (Get-Command Set-MpPreference -ErrorAction SilentlyContinue)) {
+            Set-MpPreference -SubmitSamplesConsent $p.Samples -Force -ErrorAction SilentlyContinue
+            [void]$log.Add("  Samples: $($p.Samples)")
+        }
+        if ($p.Exclusiones) {
+            foreach ($ex in $p.Exclusiones) {
+                if (Test-Path $ex) {
+                    Add-MpPreference -ExclusionPath $ex -Force -ErrorAction SilentlyContinue
+                    [void]$log.Add("  Exclusion agregada: $ex")
+                }
+            }
+        }
+    } catch { [void]$log.Add("  Error: $($_.Exception.Message)") }
+    $script:AppConfig.LastProfile = $Nombre
+    Save-AppConfig
+    return ($log -join "`n")
+}
+
+# ==================================================================
+# 16. BACKUP / RESTORE JSON
+# ==================================================================
+function Export-ConfigBackup {
+    param([string]$Destino)
+    try {
+        $data = @{
+            Fecha       = (Get-Date).ToString("s")
+            Version     = "4.0"
+            Servicios   = @{}
+            Preferencias= @{}
+            Politicas   = @{}
+            Tamper      = $false
+            AppConfig   = $script:AppConfig
+        }
+        foreach ($s in @("WinDefend","WdNisSvc","Sense","WdNisDrv")) {
+            $svc = Get-Service -Name $s -ErrorAction SilentlyContinue
+            if ($null -ne $svc) { $data.Servicios[$s] = $svc.Status.ToString() }
+        }
+        if (Get-Command Get-MpPreference -ErrorAction SilentlyContinue) {
+            try {
+                $p = Get-MpPreference -ErrorAction Stop
+                $data.Preferencias.MAPSReporting = $p.MAPSReporting
+                $data.Preferencias.SubmitSamplesConsent = $p.SubmitSamplesConsent
+                $data.Preferencias.DisableRealtimeMonitoring = $p.DisableRealtimeMonitoring
+            } catch { }
+        }
+        $reg = "HKLM:\SOFTWARE\Policies\Microsoft\Windows Defender"
+        if (Test-Path $reg) {
+            $r = Get-ItemProperty -Path $reg -ErrorAction SilentlyContinue
+            if ($r) { $data.Politicas.DisableAntiSpyware = $r.DisableAntiSpyware; $data.Politicas.DisableAntiVirus = $r.DisableAntiVirus }
+        }
+        try { $data.Tamper = (Get-MpComputerStatus -ErrorAction Stop).IsTamperProtected } catch { }
+        $data | ConvertTo-Json -Depth 6 | Set-Content -Path $Destino -Encoding UTF8 -Force
+        Write-AppLog "Backup exportado a: $Destino" "INFO"
+        return $true
+    } catch { Write-AppLog "Error export: $($_.Exception.Message)" "ERROR"; return $false }
+}
+function Import-ConfigBackup {
+    param([string]$Origen)
+    try {
+        $data = Get-Content $Origen -Raw -ErrorAction Stop | ConvertFrom-Json
+        $log = New-Object System.Collections.ArrayList
+        [void]$log.Add("Backup del: $($data.Fecha)")
+        [void]$log.Add("Version: $($data.Version)")
+        [void]$log.Add("Servicios en backup: $($data.Servicios.PSObject.Properties.Count)")
+        [void]$log.Add("Tamper en backup: $($data.Tamper)")
+        [void]$log.Add("")
+        [void]$log.Add("Para restaurar preferencias, usa ACTIVAR PROTECCION.")
+        [void]$log.Add("Este cuadro es solo informativo.")
+        Write-AppLog "Backup leido: $Origen" "INFO"
+        return ($log -join "`n")
+    } catch { return "Error: $($_.Exception.Message)" }
+}
+
+# ==================================================================
+# 17. PROGRAMADOR DE TAREAS
+# ==================================================================
+function Register-TrayTask {
+    param([string]$Nombre, [string]$Accion, [string]$Hora)
+    try {
+        $cmd = "powershell.exe -WindowStyle Hidden -ExecutionPolicy Bypass -File `"$($script:ScriptPath)`" -silent -action $Accion"
+        $action  = New-ScheduledTaskAction -Execute "powershell.exe" -Argument "-WindowStyle Hidden -ExecutionPolicy Bypass -File `"$($script:ScriptPath)`" -silent -action $Accion"
+        $trigger = New-ScheduledTaskTrigger -Daily -At $Hora
+        $principal = New-ScheduledTaskPrincipal -UserId "SYSTEM" -RunLevel Highest
+        Register-ScheduledTask -TaskName "DefenderTray_$Nombre" -Action $action -Trigger $trigger -Principal $principal -Force -ErrorAction Stop | Out-Null
+        Write-AppLog "Tarea programada: $Nombre a las $Hora" "INFO"
+        return $true
+    } catch {
+        Write-AppLog "Error programando: $($_.Exception.Message)" "ERROR"
+        return $false
+    }
+}
+function Unregister-TrayTask { param([string]$Nombre)
+    try { Unregister-ScheduledTask -TaskName "DefenderTray_$Nombre" -Confirm:$false -ErrorAction Stop; return $true } catch { return $false }
+}
+function Get-TrayTasks {
+    try { return Get-ScheduledTask -TaskName "DefenderTray_*" -ErrorAction SilentlyContinue } catch { return @() }
+}
+
+# ==================================================================
+# 18. ACTUALIZAR FIRMAS CON PROGRESO
+# ==================================================================
+function Update-DefenderSignatures {
+    param([System.Windows.Forms.ProgressBar]$ProgressBar = $null)
+    try {
+        if (-not (Get-Command Update-MpSignature -ErrorAction SilentlyContinue)) { return "Update-MpSignature no disponible." }
+        $job = Start-Job -ScriptBlock { Update-MpSignature -ErrorAction SilentlyContinue }
+        $max = 0
+        while ($job.State -eq 'Running') {
+            $max = [math]::Min(95, $max + 2)
+            if ($null -ne $ProgressBar -and -not $ProgressBar.IsDisposed) { $ProgressBar.Value = $max }
+            [System.Windows.Forms.Application]::DoEvents()
+            Start-Sleep -Milliseconds 300
+        }
+        if ($null -ne $ProgressBar -and -not $ProgressBar.IsDisposed) { $ProgressBar.Value = 100 }
+        $r = Receive-Job -Job $job -ErrorAction SilentlyContinue
+        Remove-Job -Job $job -Force -ErrorAction SilentlyContinue
+        Write-AppLog "Firmas actualizadas." "INFO"
+        return "Firmas actualizadas correctamente."
+    } catch { return "Error: $($_.Exception.Message)" }
+}
+
+# ==================================================================
+# 19. VISOR DE EVENTOS
+# ==================================================================
+function Get-DefenderEvents {
+    $result = New-Object System.Collections.ArrayList
+    try {
+        $events = Get-WinEvent -LogName "Microsoft-Windows-Windows Defender/Operational" -MaxEvents 100 -ErrorAction Stop
+        foreach ($e in $events) {
+            $tipo = switch ($e.Id) {
+                1006 { "Malware detectado" }; 1007 { "Accion realizada" }; 1008 { "Accion fallida" }
+                1009 { "Cuarentena restaurada" }; 1015 { "Comportamiento sospechoso" }
+                1116 { "Deteccion" }; 1117 { "Accion aplicada" }
+                default { "Evento $($e.Id)" }
+            }
+            [void]$result.Add([PSCustomObject]@{ Hora=$e.TimeCreated; Id=$e.Id; Tipo=$tipo; Mensaje=($e.Message -split "`n")[0] })
+        }
+    } catch { }
+    return $result
+}
+
+# ==================================================================
+# 20. TOAST
+# ==================================================================
+function Show-Toast {
+    param([string]$Titulo, [string]$Mensaje, [string]$Tipo = "Info")
+    if ($script:SilentMode) { return }
+    try {
+        $icon = switch ($Tipo) { "Warning" { [System.Windows.Forms.ToolTipIcon]::Warning } "Error" { [System.Windows.Forms.ToolTipIcon]::Error } default { [System.Windows.Forms.ToolTipIcon]::Info } }
+        $script:notifyIcon.ShowBalloonTip(4000, $Titulo, $Mensaje, $icon)
+    } catch { }
+}
+
+# ==================================================================
+# 21. KIOSCO (password)
+# ==================================================================
+function Get-StringHash { param([string]$s); $sha = [System.Security.Cryptography.SHA256]::Create(); $b = $sha.ComputeHash([System.Text.Encoding]::UTF8.GetBytes($s)); return ([BitConverter]::ToString($b) -replace '-','').Substring(0,16) }
+function Test-KioskPassword {
+    if (-not $script:IsKioskMode) { return $true }
+    $hashGuardado = $script:AppConfig.KioskHash
+    if ([string]::IsNullOrEmpty($hashGuardado)) { return $true }
+    $dlg = New-Object System.Windows.Forms.Form
+    $dlg.Text = "Acceso restringido"; $dlg.ClientSize = New-Object System.Drawing.Size(340, 160)
+    $dlg.StartPosition = "CenterScreen"; $dlg.FormBorderStyle = "FixedDialog"
+    $dlg.MaximizeBox = $false; $dlg.MinimizeBox = $false
+    $dlg.BackColor = $script:Colors.Bg
+    $lbl = New-Object System.Windows.Forms.Label
+    $lbl.Text = "Introduce la contrasena:"; $lbl.Location = New-Object System.Drawing.Point(15, 20)
+    $lbl.Size = New-Object System.Drawing.Size(300, 20); $lbl.ForeColor = $script:Colors.Text
+    $dlg.Controls.Add($lbl)
+    $txt = New-Object System.Windows.Forms.TextBox
+    $txt.PasswordChar = '*'; $txt.Location = New-Object System.Drawing.Point(15, 50); $txt.Size = New-Object System.Drawing.Size(300, 25)
+    $txt.BackColor = $script:Colors.BgSecondary; $txt.ForeColor = $script:Colors.Text; $txt.BorderStyle = "FixedSingle"
+    $dlg.Controls.Add($txt)
+    $ok = $false
+    $btn = New-Object System.Windows.Forms.Button
+    $btn.Text = "Acceder"; $btn.Location = New-Object System.Drawing.Point(215, 90); $btn.Size = New-Object System.Drawing.Size(100, 30)
+    $btn.FlatStyle = "Flat"; $btn.FlatAppearance.BorderSize = 0
+    $btn.BackColor = $script:Colors.AccentCyan; $btn.ForeColor = [System.Drawing.Color]::White
+    $dlg.Controls.Add($btn)
+    $btn.Add_Click({
+        if ((Get-StringHash $txt.Text) -eq $hashGuardado) { $ok = $true; $dlg.Close() }
+        else { [System.Windows.Forms.MessageBox]::Show("Contrasena incorrecta.","Acceso","OK","Error") | Out-Null }
+    }.GetNewClosure())
+    $dlg.Add_KeyDown({ param($s,$e); if ($e.KeyCode -eq [System.Windows.Forms.Keys]::Escape) { $dlg.Close() } }.GetNewClosure())
+    [void]$dlg.ShowDialog()
+    return $ok
+}
+
+# ==================================================================
+# 22. DESACTIVAR (agresivo)
+# ==================================================================
+function Disable-Defender {
+    $log = New-Object System.Collections.ArrayList
+    $sw = [System.Diagnostics.Stopwatch]::StartNew()
+    try {
+        if (Get-Command Get-MpComputerStatus -ErrorAction SilentlyContinue) {
+            $tp = Get-MpComputerStatus -ErrorAction Stop
+            if ($tp.IsTamperProtected) {
+                [void]$log.Add("ERROR: Tamper Protection ACTIVA.")
+                return ($log -join "`n")
+            }
+        }
+    } catch {}
+    Write-AppLog "Iniciando desactivacion..." "INFO"
+    [void]$log.Add("[1] Preferencias...")
+    try {
+        if (Get-Command Set-MpPreference -ErrorAction SilentlyContinue) {
+            foreach ($pref in @("DisableRealtimeMonitoring","DisableBehaviorMonitoring","DisableIOAVProtection",
+                               "DisableScriptScanning","DisableBlockAtFirstSeen","DisableArchiveScanning",
+                               "DisableEmailScanning","DisableIntrusionPreventionSystem","DisableRemovableDriveScanning",
+                               "DisableScanningNetworkFiles")) {
+                try { Set-MpPreference @{ $pref = $true } -Force -ErrorAction SilentlyContinue } catch { }
+            }
+            try { Set-MpPreference -MAPSReporting Disabled -Force -ErrorAction SilentlyContinue } catch { }
+            try { Set-MpPreference -SubmitSamplesConsent NeverSend -Force -ErrorAction SilentlyContinue } catch { }
+        }
+    } catch { }
+    [void]$log.Add("[2] Politicas de grupo (reg delete)...")
+    foreach ($p in @("HKLM\SOFTWARE\Policies\Microsoft\Windows Defender",
+                     "HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies",
+                     "HKLM\SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Policies",
+                     "HKCU\Software\Microsoft\Windows\CurrentVersion\Policies")) {
+        try { $null = & reg.exe delete $p /f 2>&1; [void]$log.Add("     OK: $p") } catch { }
+    }
+    [void]$log.Add("[3] Recreando politicas...")
+    $dp = "HKLM:\SOFTWARE\Policies\Microsoft\Windows Defender"
+    if (-not (Test-Path $dp)) { New-Item -Path $dp -Force | Out-Null }
+    Set-ItemProperty -Path $dp -Name "DisableAntiSpyware" -Value 1 -Type DWord -Force -ErrorAction SilentlyContinue
+    Set-ItemProperty -Path $dp -Name "DisableAntiVirus" -Value 1 -Type DWord -Force -ErrorAction SilentlyContinue
+    $rtp = "$dp\Real-Time Protection"
+    if (-not (Test-Path $rtp)) { New-Item -Path $rtp -Force | Out-Null }
+    foreach ($v in @("DisableRealtimeMonitoring","DisableBehaviorMonitoring","DisableOnAccessProtection",
+                     "DisableScanOnRealtimeEnable","DisableIOAVProtection","DisableScriptScanning")) {
+        Set-ItemProperty -Path $rtp -Name $v -Value 1 -Type DWord -Force -ErrorAction SilentlyContinue
+    }
+    [void]$log.Add("[4] Deteniendo servicios...")
+    foreach ($s in @("WinDefend","WdNisSvc","Sense","WdNisDrv","WdBoot","Wdfilter","SecurityHealthService")) {
+        try { $null = & sc.exe stop $s 2>&1; $null = & sc.exe config $s start= disabled 2>&1 } catch { }
+    }
+    [void]$log.Add("[5] Registro Start=4...")
+    foreach ($sp in @("HKLM:\SYSTEM\CurrentControlSet\Services\WinDefend",
+                      "HKLM:\SYSTEM\CurrentControlSet\Services\WdNisSvc",
+                      "HKLM:\SYSTEM\CurrentControlSet\Services\Sense",
+                      "HKLM:\SYSTEM\CurrentControlSet\Services\WdNisDrv",
+                      "HKLM:\SYSTEM\CurrentControlSet\Services\WdBoot",
+                      "HKLM:\SYSTEM\CurrentControlSet\Services\Wdfilter")) {
+        if (Test-Path $sp) { Set-ItemProperty -Path $sp -Name "Start" -Value 4 -Type DWord -Force -ErrorAction SilentlyContinue }
+    }
+    [void]$log.Add("[6] Verificando...")
+    Wait-WithDoEvents -Milliseconds 5000
+    $svc = Get-Service -Name WinDefend -ErrorAction SilentlyContinue
+    if ($null -ne $svc -and $svc.Status -eq 'Running') {
+        [void]$log.Add("[7] Reintentando...")
+        $null = & sc.exe stop WinDefend 2>&1
+        Stop-Service -Name WinDefend -Force -ErrorAction SilentlyContinue
+        Set-ItemProperty -Path "HKLM:\SYSTEM\CurrentControlSet\Services\WinDefend" -Name "Start" -Value 4 -Type DWord -Force -ErrorAction SilentlyContinue
+        $null = & sc.exe config WinDefend start= disabled 2>&1
+        Wait-WithDoEvents -Milliseconds 3000
+    }
+    $sw.Stop()
+    [void]$log.Add("[OK] Tiempo: {0:N2}s" -f $sw.Elapsed.TotalSeconds)
+    Clear-StatusCache
+    return ($log -join "`n")
+}
+
+# ==================================================================
+# 23. ACTIVAR
+# ==================================================================
+function Enable-Defender {
+    param([bool]$EnableCloud = $false, [bool]$EnableSamples = $false, [bool]$EnableTamper = $false)
+    $log = New-Object System.Collections.ArrayList
+    $sw = [System.Diagnostics.Stopwatch]::StartNew()
+    Write-AppLog "Iniciando activacion..." "INFO"
+    foreach ($s in @("WinDefend","WdNisSvc","Sense","WdNisDrv","WdBoot","Wdfilter")) {
+        $svcPath = "HKLM:\SYSTEM\CurrentControlSet\Services\$s"
+        if (Test-Path $svcPath) { Set-ItemProperty -Path $svcPath -Name "Start" -Value 2 -Type DWord -Force -ErrorAction SilentlyContinue }
+    }
+    [void]$log.Add("[1] Start=2 restaurado.")
+    $regPath = "HKLM:\SOFTWARE\Policies\Microsoft\Windows Defender"
+    try {
+        if (Test-Path $regPath) { Remove-Item -Path $regPath -Recurse -Force -ErrorAction Stop; [void]$log.Add("[2] Politicas eliminadas.") }
+        else { [void]$log.Add("[2] Sin politicas.") }
+    } catch { [void]$log.Add("[2] Fallback.") }
+    $rtWk = "HKLM:\SOFTWARE\Microsoft\Windows Defender\Real-Time Protection"
+    if (Test-Path $rtWk) {
+        foreach ($n in @("DisableRealtimeMonitoring","DisableBehaviorMonitoring","DisableOnAccessProtection",
+                         "DisableScanOnRealtimeEnable","DisableIOAVProtection","DisableScriptScanning")) {
+            Remove-ItemProperty -Path $rtWk -Name $n -Force -ErrorAction SilentlyContinue
+        }
+    }
+    [void]$log.Add("[3] RTP claves limpiadas.")
+    foreach ($s in @("WdNisSvc","Sense")) {
+        $svc = Get-Service -Name $s -ErrorAction SilentlyContinue
+        if ($null -ne $svc) {
+            Set-Service -Name $s -StartupType Automatic -ErrorAction SilentlyContinue
+            $null = & sc.exe config $s start= auto 2>&1
+            Start-Service -Name $s -ErrorAction SilentlyContinue
+            [void]$log.Add("[4] ${s}: INICIADO")
+        }
+    }
+    try {
+        Set-Service -Name WinDefend -StartupType Automatic -ErrorAction SilentlyContinue
+        $null = & sc.exe config WinDefend start= auto 2>&1
+        Start-Service -Name WinDefend -ErrorAction SilentlyContinue
+        [void]$log.Add("[5] WinDefend: INICIADO")
+    } catch { }
+    Wait-WithDoEvents -Milliseconds 3000
+    try { Set-MpPreference -DisableRealtimeMonitoring $false -Force -ErrorAction SilentlyContinue } catch { }
+    Wait-WithDoEvents -Milliseconds 1000
+    try { Set-MpPreference -DisableRealtimeMonitoring $false -Force -ErrorAction SilentlyContinue } catch { }
+    if ($EnableCloud -and (Get-Command Set-MpPreference -ErrorAction SilentlyContinue)) {
+        try { Set-MpPreference -MAPSReporting Advanced -Force -ErrorAction Stop; [void]$log.Add("[7] MAPS: ACTIVADO") }
+        catch { [void]$log.Add("[7] Error nube") }
+    } else { [void]$log.Add("[7] Nube omitida") }
+    if ($EnableSamples -and (Get-Command Set-MpPreference -ErrorAction SilentlyContinue)) {
+        try { Set-MpPreference -SubmitSamplesConsent 1 -Force -ErrorAction Stop; [void]$log.Add("[8] Muestras: ACTIVADO") }
+        catch { [void]$log.Add("[8] Error muestras") }
+    } else { [void]$log.Add("[8] Muestras omitido") }
+    if ($EnableTamper) {
+        $tpPath = "HKLM:\SOFTWARE\Microsoft\Windows Defender\Features"
+        try {
+            if (-not (Test-Path $tpPath)) { New-Item -Path $tpPath -Force | Out-Null }
+            Set-ItemProperty -Path $tpPath -Name "TamperProtection" -Value 5 -Type DWord -Force -ErrorAction SilentlyContinue
+            Set-ItemProperty -Path $tpPath -Name "TamperProtectionSource" -Value 1 -Type String -Force -ErrorAction SilentlyContinue
+            [void]$log.Add("[9] Registro Tamper escrito.")
+            Stop-Service -Name WinDefend -Force -ErrorAction SilentlyContinue
+            Wait-WithDoEvents -Milliseconds 800
+            Start-Service -Name WinDefend -ErrorAction SilentlyContinue
+            Wait-WithDoEvents -Milliseconds 3000
+        } catch { }
+        $verify = $false
+        try { $verify = (Get-MpComputerStatus -ErrorAction Stop).IsTamperProtected } catch { }
+        if ($verify) { [void]$log.Add("[9] Tamper: CONFIRMADO") } else { [void]$log.Add("[9] Tamper: RECHAZADO por Windows") }
+    } else { [void]$log.Add("[9] Tamper omitido") }
+    $sw.Stop()
+    [void]$log.Add("[OK] Tiempo: {0:N2}s" -f $sw.Elapsed.TotalSeconds)
+    Clear-StatusCache
+    return ($log -join "`n")
+}
+
+# ==================================================================
+# 24. ADMIN / OS / EXCLUSION
+# ==================================================================
+function Test-Admin {
+    return ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole(
+        [Security.Principal.WindowsBuiltInRole]::Administrator)
+}
+function Get-OSInfo {
+    try {
+        $os = Get-CimInstance -ClassName Win32_OperatingSystem -ErrorAction Stop
+        return [PSCustomObject]@{ Caption=$os.Caption; Version=$os.Version; BuildNumber=$os.BuildNumber }
+    } catch { return [PSCustomObject]@{ Caption="Desconocido"; Version="?"; BuildNumber="?" } }
+}
+function Add-DefenderExclusion {
+    try {
+        $sp = $PSScriptRoot; if ([string]::IsNullOrWhiteSpace($sp)) { $sp = (Get-Location).Path }
+        if (Get-Command Add-MpPreference -ErrorAction SilentlyContinue) {
+            Add-MpPreference -ExclusionPath $sp -Force -ErrorAction Stop
+            return $true
+        }
+    } catch { }
+    return $false
+}
+
+# ==================================================================
+# 25. AUTOSTART
+# ==================================================================
+function Get-AutoStartEnabled {
+    $runKey = "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Run"
+    try { return ($null -ne (Get-ItemProperty -Path $runKey -Name "DefenderTray" -ErrorAction SilentlyContinue)) } catch { return $false }
+}
+function Set-AutoStart {
+    param([bool]$Enable)
+    $runKey = "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Run"
+    try {
+        if ($Enable) {
+            if ([string]::IsNullOrWhiteSpace($script:ScriptPath)) { return $false }
+            $cmd = "powershell.exe -WindowStyle Hidden -ExecutionPolicy Bypass -File `"$($script:ScriptPath)`""
+            Set-ItemProperty -Path $runKey -Name "DefenderTray" -Value $cmd -Force
+            $script:AppConfig.AutoStart = $true
+        } else {
+            Remove-ItemProperty -Path $runKey -Name "DefenderTray" -Force -ErrorAction SilentlyContinue
+            $script:AppConfig.AutoStart = $false
+        }
+        Save-AppConfig
+        return $true
+    } catch { return $false }
+}
+
+# ==================================================================
+# 26. ICONOS DINAMICOS
+# ==================================================================
+function New-ShieldBitmap {
+    param([System.Drawing.Color]$FillColor, [int]$Size = 32)
+    try {
+        $bmp = New-Object System.Drawing.Bitmap $Size, $Size
+        $g = [System.Drawing.Graphics]::FromImage($bmp)
+        $g.SmoothingMode = [System.Drawing.Drawing2D.SmoothingMode]::AntiAlias
+        $g.Clear([System.Drawing.Color]::Transparent)
+        $pts = New-Object 'System.Drawing.Point[]' 6
+        $pts[0] = New-Object System.Drawing.Point ([int]($Size*0.5)), ([int]($Size*0.05))
+        $pts[1] = New-Object System.Drawing.Point ([int]($Size*0.9)), ([int]($Size*0.25))
+        $pts[2] = New-Object System.Drawing.Point ([int]($Size*0.9)), ([int]($Size*0.55))
+        $pts[3] = New-Object System.Drawing.Point ([int]($Size*0.5)), ([int]($Size*0.95))
+        $pts[4] = New-Object System.Drawing.Point ([int]($Size*0.1)), ([int]($Size*0.55))
+        $pts[5] = New-Object System.Drawing.Point ([int]($Size*0.1)), ([int]($Size*0.25))
+        $brush = New-Object System.Drawing.SolidBrush $FillColor
+        $g.FillPolygon($brush, $pts)
+        $pen = New-Object System.Drawing.Pen ([System.Drawing.Color]::FromArgb(0,229,255)), 1.5
+        $g.DrawPolygon($pen, $pts)
+        $g.Dispose(); $brush.Dispose(); $pen.Dispose()
+        return $bmp
+    } catch { return $null }
+}
+$script:IconBmpOk      = New-ShieldBitmap -FillColor ([System.Drawing.Color]::FromArgb(0, 200, 100))
+$script:IconBmpBad     = New-ShieldBitmap -FillColor ([System.Drawing.Color]::FromArgb(220, 40, 80))
+$script:IconBmpPartial = New-ShieldBitmap -FillColor ([System.Drawing.Color]::FromArgb(220, 140, 0))
+$script:IconOk      = if ($null -ne $script:IconBmpOk)      { [System.Drawing.Icon]::FromHandle($script:IconBmpOk.GetHicon()) }      else { [System.Drawing.SystemIcons]::Shield }
+$script:IconBad     = if ($null -ne $script:IconBmpBad)     { [System.Drawing.Icon]::FromHandle($script:IconBmpBad.GetHicon()) }     else { [System.Drawing.SystemIcons]::Error }
+$script:IconPartial = if ($null -ne $script:IconBmpPartial) { [System.Drawing.Icon]::FromHandle($script:IconBmpPartial.GetHicon()) } else { [System.Drawing.SystemIcons]::Warning }
+
+# ==================================================================
+# 27. CONTROLES AUXILIARES
+# ==================================================================
+function New-NeonButton {
+    param([string]$Texto, [System.Drawing.Color]$Color, [System.Drawing.Color]$Hover,
+          [int]$X, [int]$Y, [int]$Ancho = 180, [int]$Alto = 30)
+    $b = New-Object System.Windows.Forms.Button
+    $b.Text = $Texto
+    $b.Size = New-Object System.Drawing.Size($Ancho, $Alto)
+    $b.Location = New-Object System.Drawing.Point($X, $Y)
+    $b.FlatStyle = "Flat"; $b.FlatAppearance.BorderSize = 1
+    $b.FlatAppearance.BorderColor = $Color
+    $b.FlatAppearance.MouseOverBackColor = $Hover
+    $b.FlatAppearance.MouseDownBackColor = $Color
+    $b.UseVisualStyleBackColor = $false
+    $b.BackColor = $Color; $b.ForeColor = [System.Drawing.Color]::White
+    $b.Font = New-Object System.Drawing.Font("Segoe UI Semibold", 9, [System.Drawing.FontStyle]::Bold)
+    $b.Cursor = "Hand"
+    $b.Tag = @{ Normal = $Color; Hover = $Hover; Habilitado = $true }
+    return $b
+}
+function Set-NeonButtonState {
+    param([System.Windows.Forms.Button]$Boton, [bool]$Habilitado)
+    if ($null -eq $Boton) { return }
+    if ($Habilitado) {
+        $Boton.BackColor = $Boton.Tag.Normal
+        $Boton.ForeColor = [System.Drawing.Color]::White
+        $Boton.FlatAppearance.BorderColor = $Boton.Tag.Normal
+        $Boton.FlatAppearance.MouseOverBackColor = $Boton.Tag.Hover
+        $Boton.Cursor = "Hand"; $Boton.Tag.Habilitado = $true
+    } else {
+        $Boton.BackColor = $script:Colors.BtnDisabled
+        $Boton.ForeColor = $script:Colors.BtnDisabledT
+        $Boton.FlatAppearance.BorderColor = $script:Colors.BtnDisabled
+        $Boton.FlatAppearance.MouseOverBackColor = $script:Colors.BtnDisabled
+        $Boton.Cursor = "Default"; $Boton.Tag.Habilitado = $false
+    }
+}
+
+# ==================================================================
+# 28. TOOLTIPS GLOBALES
+# ==================================================================
+$script:Tooltip = New-Object System.Windows.Forms.ToolTip
+$script:Tooltip.AutoPopDelay = 10000; $script:Tooltip.InitialDelay = 400; $script:Tooltip.ReshowDelay = 100; $script:Tooltip.ShowAlways = $true
+function Set-Help {
+    param([System.Windows.Forms.Control]$C, [string]$Tip)
+    if ($null -eq $C) { return }
+    try { $script:Tooltip.SetToolTip($C, $Tip) } catch { }
+}
+
+# ==================================================================
+# 29. DIALOGO: VERIFICACION COMPLETA
+# ==================================================================
+function Update-CompleteStatusView {
+    param([System.Windows.Forms.ListView]$ListView, [System.Windows.Forms.Label]$StatusLabel)
+    if ($null -eq $ListView -or $ListView.IsDisposed) { return }
+    Clear-StatusCache
+    $ListView.BeginUpdate()
+    try {
+        $ListView.Items.Clear()
+        foreach ($row in (Get-CompleteDefenderReport)) {
+            $it = New-Object System.Windows.Forms.ListViewItem($row.Modulo)
+            [void]$it.SubItems.Add([string]$row.Valor)
+            if ($null -ne $row.Color) { $it.ForeColor = $row.Color }
+            [void]$ListView.Items.Add($it)
+        }
+    } finally { $ListView.EndUpdate() }
+    $q = Get-QuickStatus
+    if ($q.Estado -eq "ACTIVO") { $StatusLabel.Text = ">>> $($T('Activo')) <<<"; $StatusLabel.ForeColor = $script:Colors.Ok }
+    elseif ($q.Estado -eq "PARCIAL") { $StatusLabel.Text = ">>> $($T('Parcial')) <<<"; $StatusLabel.ForeColor = $script:Colors.Warn }
+    else { $StatusLabel.Text = ">>> $($T('Desactivado')) <<<"; $StatusLabel.ForeColor = $script:Colors.Bad }
+}
+function Show-CompleteStatusDialog {
+    $dlg = New-Object System.Windows.Forms.Form
+    $dlg.Text = "Verificacion completa - Windows Defender"
+    $dlg.ClientSize = New-Object System.Drawing.Size(680, 600)
+    $dlg.StartPosition = "CenterScreen"; $dlg.FormBorderStyle = "FixedDialog"
+    $dlg.MaximizeBox = $false; $dlg.MinimizeBox = $false
+    $dlg.BackColor = $script:Colors.Bg
+    $dlg.Font = New-Object System.Drawing.Font("Segoe UI", 9)
+    $dlg.Icon = $script:IconOk
+    $header = New-Object System.Windows.Forms.Panel
+    $header.Dock = "Top"; $header.Height = 60; $header.BackColor = $script:Colors.AccentPurple
+    $dlg.Controls.Add($header)
+    $lbl = New-Object System.Windows.Forms.Label
+    $lbl.Text = "VERIFICACION COMPLETA"; $lbl.Font = New-Object System.Drawing.Font("Consolas", 14, [System.Drawing.FontStyle]::Bold)
+    $lbl.ForeColor = [System.Drawing.Color]::White; $lbl.BackColor = [System.Drawing.Color]::Transparent
+    $lbl.AutoSize = $true; $lbl.Location = New-Object System.Drawing.Point(15, 18); $header.Controls.Add($lbl)
+    $lblEstado = New-Object System.Windows.Forms.Label
+    $lblEstado.Font = New-Object System.Drawing.Font("Consolas", 10, [System.Drawing.FontStyle]::Bold)
+    $lblEstado.AutoSize = $false; $lblEstado.Size = New-Object System.Drawing.Size(650, 24)
+    $lblEstado.Location = New-Object System.Drawing.Point(15, 68); $lblEstado.TextAlign = "MiddleLeft"
+    $lblEstado.BackColor = [System.Drawing.Color]::Transparent; $lblEstado.ForeColor = $script:Colors.Text
+    $dlg.Controls.Add($lblEstado)
+    $lv = New-Object System.Windows.Forms.ListView
+    $lv.View = "Details"; $lv.FullRowSelect = $true; $lv.GridLines = $false
+    $lv.HeaderStyle = "Nonclickable"; $lv.Font = New-Object System.Drawing.Font("Consolas", 9)
+    $lv.Location = New-Object System.Drawing.Point(15, 100); $lv.Size = New-Object System.Drawing.Size(650, 430)
+    $lv.BorderStyle = "FixedSingle"; $lv.BackColor = $script:Colors.BgSecondary; $lv.ForeColor = $script:Colors.Text
+    [void]$lv.Columns.Add("Modulo", 300); [void]$lv.Columns.Add("Estado", 320)
+    $dlg.Controls.Add($lv)
+    $btnRef = New-NeonButton "Refrescar" $script:Colors.AccentPurple $script:Colors.AccentPurpH 15 545 140 32
+    $btnCop = New-NeonButton "Copiar al portapapeles" $script:Colors.AccentCyan $script:Colors.AccentCyanH 165 545 200 32
+    $btnCerr = New-NeonButton "Cerrar" $script:Colors.Neutral $script:Colors.TextMuted 525 545 140 32
+    $dlg.Controls.Add($btnRef); $dlg.Controls.Add($btnCop); $dlg.Controls.Add($btnCerr)
+    Update-CompleteStatusView -ListView $lv -StatusLabel $lblEstado
+    $btnRef.Add_Click({ Update-CompleteStatusView -ListView $lv -StatusLabel $lblEstado }.GetNewClosure())
+    $btnCop.Add_Click({
+        $sb = New-Object System.Text.StringBuilder
+        [void]$sb.AppendLine("VERIFICACION COMPLETA - WINDOWS DEFENDER")
+        [void]$sb.AppendLine(("Fecha: {0:yyyy-MM-dd HH:mm:ss}" -f (Get-Date)))
+        [void]$sb.AppendLine("Estado: $($lblEstado.Text)"); [void]$sb.AppendLine("------------------------------------")
+        foreach ($it in $lv.Items) { [void]$sb.AppendLine(("{0,-40} {1}" -f $it.Text, $it.SubItems[1].Text)) }
+        try { [System.Windows.Forms.Clipboard]::SetText($sb.ToString()); [System.Windows.Forms.MessageBox]::Show("Copiado.","OK","OK","Information") | Out-Null } catch { }
+    }.GetNewClosure())
+    $btnCerr.Add_Click({ $dlg.Close() }.GetNewClosure())
+    [void]$dlg.ShowDialog()
+    $dlg.Dispose()
+}
+
+# ==================================================================
+# 30. DIALOGO: HISTORIAL
+# ==================================================================
+function Show-HistoryDialog {
+    $dlg = New-Object System.Windows.Forms.Form
+    $dlg.Text = "Historial"; $dlg.ClientSize = New-Object System.Drawing.Size(700, 500)
+    $dlg.StartPosition = "CenterScreen"; $dlg.Icon = $script:IconOk
+    $dlg.BackColor = $script:Colors.Bg; $dlg.Font = New-Object System.Drawing.Font("Segoe UI", 9)
+    $header = New-Object System.Windows.Forms.Panel
+    $header.Dock = "Top"; $header.Height = 55; $header.BackColor = $script:Colors.AccentBlue
+    $dlg.Controls.Add($header)
+    $lblH = New-Object System.Windows.Forms.Label
+    $lblH.Text = "HISTORIAL (ultimas 20 operaciones)"; $lblH.Font = New-Object System.Drawing.Font("Consolas", 12, [System.Drawing.FontStyle]::Bold)
+    $lblH.ForeColor = [System.Drawing.Color]::White; $lblH.BackColor = [System.Drawing.Color]::Transparent
+    $lblH.AutoSize = $true; $lblH.Location = New-Object System.Drawing.Point(15, 15); $header.Controls.Add($lblH)
+    $lv = New-Object System.Windows.Forms.ListView
+    $lv.View = "Details"; $lv.FullRowSelect = $true; $lv.GridLines = $false
+    $lv.Font = New-Object System.Drawing.Font("Consolas", 9)
+    $lv.Location = New-Object System.Drawing.Point(15, 70); $lv.Size = New-Object System.Drawing.Size(670, 380)
+    $lv.BorderStyle = "FixedSingle"; $lv.BackColor = $script:Colors.BgSecondary; $lv.ForeColor = $script:Colors.Text
+    [void]$lv.Columns.Add("Hora", 160); [void]$lv.Columns.Add("Accion", 130)
+    [void]$lv.Columns.Add("Resultado", 280); [void]$lv.Columns.Add("Seg", 80)
+    foreach ($e in $script:EventHistory) {
+        $it = New-Object System.Windows.Forms.ListViewItem($e.Hora.ToString("yyyy-MM-dd HH:mm:ss"))
+        [void]$it.SubItems.Add($e.Accion); [void]$it.SubItems.Add($e.Resultado); [void]$it.SubItems.Add(("{0:N2}" -f $e.Segundos))
+        if ($e.Resultado -match "OK|activado correctamente|desactivado correctamente") { $it.ForeColor = $script:Colors.Ok }
+        elseif ($e.Resultado -match "parcial|ERROR") { $it.ForeColor = $script:Colors.Bad }
+        [void]$lv.Items.Add($it)
+    }
+    $dlg.Controls.Add($lv)
+    $btnCsv = New-NeonButton "Abrir CSV" $script:Colors.AccentCyan $script:Colors.AccentCyanH 15 460 140 30
+    $btnCerr = New-NeonButton "Cerrar" $script:Colors.Neutral $script:Colors.TextMuted 545 460 140 30
+    $dlg.Controls.Add($btnCsv); $dlg.Controls.Add($btnCerr)
+    $btnCerr.Add_Click({ $dlg.Close() }.GetNewClosure())
+    $btnCsv.Add_Click({
+        if (Test-Path $script:CsvFile) { Start-Process "notepad.exe" -ArgumentList $script:CsvFile }
+    }.GetNewClosure())
+    [void]$dlg.ShowDialog()
+    $dlg.Dispose()
+}
+
+# ==================================================================
+# 31. DIALOGO: EVENTOS
+# ==================================================================
+function Show-EventsDialog {
+    $dlg = New-Object System.Windows.Forms.Form
+    $dlg.Text = "Eventos de Windows Defender"; $dlg.ClientSize = New-Object System.Drawing.Size(800, 560)
+    $dlg.StartPosition = "CenterScreen"; $dlg.Icon = $script:IconOk
+    $dlg.BackColor = $script:Colors.Bg; $dlg.Font = New-Object System.Drawing.Font("Segoe UI", 9)
+    $header = New-Object System.Windows.Forms.Panel
+    $header.Dock = "Top"; $header.Height = 55; $header.BackColor = $script:Colors.AccentRed
+    $dlg.Controls.Add($header)
+    $lblH = New-Object System.Windows.Forms.Label
+    $lblH.Text = "EVENTOS DEL SISTEMA (ultimos 100)"; $lblH.Font = New-Object System.Drawing.Font("Consolas", 12, [System.Drawing.FontStyle]::Bold)
+    $lblH.ForeColor = [System.Drawing.Color]::White; $lblH.BackColor = [System.Drawing.Color]::Transparent
+    $lblH.AutoSize = $true; $lblH.Location = New-Object System.Drawing.Point(15, 15); $header.Controls.Add($lblH)
+    $lv = New-Object System.Windows.Forms.ListView
+    $lv.View = "Details"; $lv.FullRowSelect = $true; $lv.GridLines = $false
+    $lv.Font = New-Object System.Drawing.Font("Consolas", 9)
+    $lv.Location = New-Object System.Drawing.Point(15, 70); $lv.Size = New-Object System.Drawing.Size(770, 440)
+    $lv.BorderStyle = "FixedSingle"; $lv.BackColor = $script:Colors.BgSecondary; $lv.ForeColor = $script:Colors.Text
+    [void]$lv.Columns.Add("Hora", 160); [void]$lv.Columns.Add("ID", 60); [void]$lv.Columns.Add("Tipo", 220); [void]$lv.Columns.Add("Mensaje", 300)
+    $events = Get-DefenderEvents
+    foreach ($e in $events) {
+        $it = New-Object System.Windows.Forms.ListViewItem($e.Hora.ToString("yyyy-MM-dd HH:mm:ss"))
+        [void]$it.SubItems.Add($e.Id); [void]$it.SubItems.Add($e.Tipo); [void]$it.SubItems.Add($e.Mensaje)
+        if ($e.Id -in 1006,1116,1015) { $it.ForeColor = $script:Colors.Bad }
+        elseif ($e.Id -in 1007,1117) { $it.ForeColor = $script:Colors.Warn }
+        else { $it.ForeColor = $script:Colors.TextDiag }
+        [void]$lv.Items.Add($it)
+    }
+    $dlg.Controls.Add($lv)
+    $btnCerr = New-NeonButton "Cerrar" $script:Colors.Neutral $script:Colors.TextMuted 645 525 140 30
+    $dlg.Controls.Add($btnCerr)
+    $btnCerr.Add_Click({ $dlg.Close() }.GetNewClosure())
+    [void]$dlg.ShowDialog()
+    $dlg.Dispose()
+}
+
+# ==================================================================
+# 32. DIALOGO: CHART (estadisticas)
+# ==================================================================
+function Show-ChartDialog {
+    $dlg = New-Object System.Windows.Forms.Form
+    $dlg.Text = "Estadisticas de uso"; $dlg.ClientSize = New-Object System.Drawing.Size(780, 540)
+    $dlg.StartPosition = "CenterScreen"; $dlg.Icon = $script:IconOk
+    $dlg.BackColor = $script:Colors.Bg; $dlg.Font = New-Object System.Drawing.Font("Segoe UI", 9)
+    $header = New-Object System.Windows.Forms.Panel
+    $header.Dock = "Top"; $header.Height = 55; $header.BackColor = $script:Colors.AccentAmber
+    $dlg.Controls.Add($header)
+    $lblH = New-Object System.Windows.Forms.Label
+    $lblH.Text = "ESTADISTICAS DE OPERACIONES"; $lblH.Font = New-Object System.Drawing.Font("Consolas", 12, [System.Drawing.FontStyle]::Bold)
+    $lblH.ForeColor = [System.Drawing.Color]::White; $lblH.BackColor = [System.Drawing.Color]::Transparent
+    $lblH.AutoSize = $true; $lblH.Location = New-Object System.Drawing.Point(15, 15); $header.Controls.Add($lblH)
+    $chart = New-Object System.Windows.Forms.DataVisualization.Charting.Chart
+    $chart.Location = New-Object System.Drawing.Point(15, 70); $chart.Size = New-Object System.Drawing.Size(750, 420)
+    $chart.BackColor = $script:Colors.BgSecondary
+    $chart.ChartAreas.Add((New-Object System.Windows.Forms.DataVisualization.Charting.ChartArea))
+    $chart.ChartAreas[0].BackColor = $script:Colors.BgSecondary
+    $chart.ChartAreas[0].AxisX.LabelStyle.ForeColor = $script:Colors.Text
+    $chart.ChartAreas[0].AxisY.LabelStyle.ForeColor = $script:Colors.Text
+    $chart.ChartAreas[0].AxisX.MajorGrid.LineColor = $script:Colors.GridLine
+    $chart.ChartAreas[0].AxisY.MajorGrid.LineColor = $script:Colors.GridLine
+    $series = New-Object System.Windows.Forms.DataVisualization.Charting.Series
+    $series.Name = "Operaciones"; $series.ChartType = "Column"
+    $series.Color = $script:Colors.AccentCyan
+    # Contar por dia (ultimos 7)
+    $porDia = @{}
+    foreach ($e in $script:EventHistory) {
+        $k = $e.Hora.ToString("dd/MM")
+        if (-not $porDia.ContainsKey($k)) { $porDia[$k] = 0 }
+        $porDia[$k]++
+    }
+    $i = 1
+    foreach ($k in ($porDia.Keys | Sort-Object)) {
+        [void]$series.Points.AddXY($k, $porDia[$k])
+        $series.Points[$series.Points.Count - 1].Color = $script:Colors.AccentCyan
+        $i++
+    }
+    $chart.Series.Add($series)
+    $chart.Titles.Add((New-Object System.Windows.Forms.DataVisualization.Charting.Title("Operaciones por dia (ultimas 20)")))
+    $chart.Titles[0].ForeColor = $script:Colors.Text
+    $dlg.Controls.Add($chart)
+    $btnCerr = New-NeonButton "Cerrar" $script:Colors.Neutral $script:Colors.TextMuted 625 500 140 30
+    $dlg.Controls.Add($btnCerr)
+    $btnCerr.Add_Click({ $dlg.Close() }.GetNewClosure())
+    [void]$dlg.ShowDialog()
+    $dlg.Dispose()
+}
+
+# ==================================================================
+# 33. DIALOGO: PERFILES
+# ==================================================================
+function Show-ProfilesDialog {
+    $dlg = New-Object System.Windows.Forms.Form
+    $dlg.Text = "Perfiles predefinidos"; $dlg.ClientSize = New-Object System.Drawing.Size(560, 460)
+    $dlg.StartPosition = "CenterScreen"; $dlg.FormBorderStyle = "FixedDialog"
+    $dlg.MaximizeBox = $false; $dlg.MinimizeBox = $false
+    $dlg.BackColor = $script:Colors.Bg; $dlg.Font = New-Object System.Drawing.Font("Segoe UI", 9)
+    $header = New-Object System.Windows.Forms.Panel
+    $header.Dock = "Top"; $header.Height = 55; $header.BackColor = $script:Colors.AccentGreen
+    $dlg.Controls.Add($header)
+    $lblH = New-Object System.Windows.Forms.Label
+    $lblH.Text = "PERFILES"; $lblH.Font = New-Object System.Drawing.Font("Consolas", 12, [System.Drawing.FontStyle]::Bold)
+    $lblH.ForeColor = [System.Drawing.Color]::White; $lblH.BackColor = [System.Drawing.Color]::Transparent
+    $lblH.AutoSize = $true; $lblH.Location = New-Object System.Drawing.Point(15, 15); $header.Controls.Add($lblH)
+    $lblInfo = New-Object System.Windows.Forms.Label
+    $lblInfo.Text = "Selecciona un perfil para aplicar una configuracion preestablecida:"
+    $lblInfo.ForeColor = $script:Colors.Text; $lblInfo.AutoSize = $true
+    $lblInfo.Location = New-Object System.Drawing.Point(15, 70); $dlg.Controls.Add($lblInfo)
+    $y = 100
+    $rbGaming = New-Object System.Windows.Forms.RadioButton
+    $rbGaming.Text = "Gaming - Desactiva RTP. Mantiene el resto activo."
+    $rbGaming.Location = New-Object System.Drawing.Point(20, $y); $rbGaming.Size = New-Object System.Drawing.Size(520, 40)
+    $rbGaming.ForeColor = $script:Colors.Text; $rbGaming.BackColor = [System.Drawing.Color]::Transparent
+    $dlg.Controls.Add($rbGaming); $y += 50
+    $rbDev = New-Object System.Windows.Forms.RadioButton
+    $rbDev.Text = "Desarrollo - Excluye carpetas de trabajo. Todo lo demas activo."
+    $rbDev.Location = New-Object System.Drawing.Point(20, $y); $rbDev.Size = New-Object System.Drawing.Size(520, 40)
+    $rbDev.ForeColor = $script:Colors.Text; $rbDev.BackColor = [System.Drawing.Color]::Transparent
+    $dlg.Controls.Add($rbDev); $y += 50
+    $rbMax = New-Object System.Windows.Forms.RadioButton
+    $rbMax.Text = "Maxima Seguridad - Todo activado, MAPS Adv, Samples, Tamper."
+    $rbMax.Location = New-Object System.Drawing.Point(20, $y); $rbMax.Size = New-Object System.Drawing.Size(520, 40)
+    $rbMax.ForeColor = $script:Colors.Text; $rbMax.BackColor = [System.Drawing.Color]::Transparent
+    $dlg.Controls.Add($rbMax); $y += 50
+    $rbPers = New-Object System.Windows.Forms.RadioButton
+    $rbPers.Text = "Personalizado - Mantener configuracion actual."
+    $rbPers.Location = New-Object System.Drawing.Point(20, $y); $rbPers.Size = New-Object System.Drawing.Size(520, 40)
+    $rbPers.ForeColor = $script:Colors.Text; $rbPers.BackColor = [System.Drawing.Color]::Transparent
+    $dlg.Controls.Add($rbPers); $rbPers.Checked = $true
+    $btnAplicar = New-NeonButton "Aplicar perfil" $script:Colors.AccentGreen $script:Colors.AccentGreenH 20 400 200 34
+    $btnCancelar = New-NeonButton "Cancelar" $script:Colors.Neutral $script:Colors.TextMuted 380 400 140 34
+    $dlg.Controls.Add($btnAplicar); $dlg.Controls.Add($btnCancelar)
+    $btnCancelar.Add_Click({ $dlg.Close() }.GetNewClosure())
+    $btnAplicar.Add_Click({
+        $nombre = "Personalizado"
+        if ($rbGaming.Checked) { $nombre = "Gaming" }
+        elseif ($rbDev.Checked) { $nombre = "Desarrollo" }
+        elseif ($rbMax.Checked) { $nombre = "Maxima Seguridad" }
+        $log = Apply-Profile -Nombre $nombre
+        [System.Windows.Forms.MessageBox]::Show($log, "Perfil aplicado", "OK", "Information") | Out-Null
+        Add-History -Accion "Perfil: $nombre" -Resultado "OK" -Segundos 0
+        $dlg.Close()
+    }.GetNewClosure())
+    [void]$dlg.ShowDialog()
+    $dlg.Dispose()
+}
+
+# ==================================================================
+# 34. DIALOGO: BACKUP / RESTORE
+# ==================================================================
+function Show-BackupDialog {
+    $dlg = New-Object System.Windows.Forms.Form
+    $dlg.Text = "Backup / Restore"; $dlg.ClientSize = New-Object System.Drawing.Size(560, 340)
+    $dlg.StartPosition = "CenterScreen"; $dlg.FormBorderStyle = "FixedDialog"
+    $dlg.MaximizeBox = $false; $dlg.MinimizeBox = $false
+    $dlg.BackColor = $script:Colors.Bg; $dlg.Font = New-Object System.Drawing.Font("Segoe UI", 9)
+    $header = New-Object System.Windows.Forms.Panel
+    $header.Dock = "Top"; $header.Height = 55; $header.BackColor = $script:Colors.AccentCyan
+    $dlg.Controls.Add($header)
+    $lblH = New-Object System.Windows.Forms.Label
+    $lblH.Text = "BACKUP / RESTORE"; $lblH.Font = New-Object System.Drawing.Font("Consolas", 12, [System.Drawing.FontStyle]::Bold)
+    $lblH.ForeColor = [System.Drawing.Color]::White; $lblH.BackColor = [System.Drawing.Color]::Transparent
+    $lblH.AutoSize = $true; $lblH.Location = New-Object System.Drawing.Point(15, 15); $header.Controls.Add($lblH)
+    $lblInfo = New-Object System.Windows.Forms.Label
+    $lblInfo.Text = "Exporta la configuracion actual o restaura desde un backup previo."
+    $lblInfo.ForeColor = $script:Colors.Text; $lblInfo.AutoSize = $true
+    $lblInfo.Location = New-Object System.Drawing.Point(15, 75); $dlg.Controls.Add($lblInfo)
+    $lblDir = New-Object System.Windows.Forms.Label
+    $lblDir.Text = "Carpeta de backups: $($script:BackupDir)"
+    $lblDir.ForeColor = $script:Colors.TextMuted; $lblDir.Font = New-Object System.Drawing.Font("Consolas", 8)
+    $lblDir.AutoSize = $true; $lblDir.Location = New-Object System.Drawing.Point(15, 105); $dlg.Controls.Add($lblDir)
+    $btnExport = New-NeonButton "EXPORTAR AHORA" $script:Colors.AccentGreen $script:Colors.AccentGreenH 20 150 200 40
+    $btnImport = New-NeonButton "ABRIR CARPETA" $script:Colors.AccentCyan $script:Colors.AccentCyanH 240 150 200 40
+    $btnListar = New-NeonButton "RESTAURAR ULTIMO" $script:Colors.AccentAmber $script:Colors.AccentAmberH 20 210 200 40
+    $btnCerr = New-NeonButton "Cerrar" $script:Colors.Neutral $script:Colors.TextMuted 240 210 200 40
+    $dlg.Controls.Add($btnExport); $dlg.Controls.Add($btnImport); $dlg.Controls.Add($btnListar); $dlg.Controls.Add($btnCerr)
+    $btnExport.Add_Click({
+        $nombre = "backup_{0:yyyy-MM-dd_HHmmss}.json" -f (Get-Date)
+        $dst = Join-Path $script:BackupDir $nombre
+        $ok = Export-ConfigBackup -Destino $dst
+        if ($ok) { [System.Windows.Forms.MessageBox]::Show("Backup creado:`n$dst","OK","OK","Information") | Out-Null }
+        else { [System.Windows.Forms.MessageBox]::Show("Error al exportar.","Error","OK","Error") | Out-Null }
+    }.GetNewClosure())
+    $btnImport.Add_Click({ Start-Process "explorer.exe" -ArgumentList $script:BackupDir }.GetNewClosure())
+    $btnListar.Add_Click({
+        $files = Get-ChildItem -Path $script:BackupDir -Filter "*.json" -ErrorAction SilentlyContinue | Sort-Object LastWriteTime -Descending
+        if ($files.Count -eq 0) { [System.Windows.Forms.MessageBox]::Show("No hay backups.","Info","OK","Information") | Out-Null; return }
+        $info = Import-ConfigBackup -Origen $files[0].FullName
+        [System.Windows.Forms.MessageBox]::Show($info, "Ultimo backup: $($files[0].Name)", "OK", "Information") | Out-Null
+    }.GetNewClosure())
+    $btnCerr.Add_Click({ $dlg.Close() }.GetNewClosure())
+    [void]$dlg.ShowDialog()
+    $dlg.Dispose()
+}
+
+# ==================================================================
+# 35. DIALOGO: PROGRAMADOR
+# ==================================================================
+function Show-SchedulerDialog {
+    $dlg = New-Object System.Windows.Forms.Form
+    $dlg.Text = "Programador de tareas"; $dlg.ClientSize = New-Object System.Drawing.Size(620, 480)
+    $dlg.StartPosition = "CenterScreen"; $dlg.FormBorderStyle = "FixedDialog"
+    $dlg.MaximizeBox = $false; $dlg.MinimizeBox = $false
+    $dlg.BackColor = $script:Colors.Bg; $dlg.Font = New-Object System.Drawing.Font("Segoe UI", 9)
+    $header = New-Object System.Windows.Forms.Panel
+    $header.Dock = "Top"; $header.Height = 55; $header.BackColor = $script:Colors.AccentPurple
+    $dlg.Controls.Add($header)
+    $lblH = New-Object System.Windows.Forms.Label
+    $lblH.Text = "PROGRAMADOR"; $lblH.Font = New-Object System.Drawing.Font("Consolas", 12, [System.Drawing.FontStyle]::Bold)
+    $lblH.ForeColor = [System.Drawing.Color]::White; $lblH.BackColor = [System.Drawing.Color]::Transparent
+    $lblH.AutoSize = $true; $lblH.Location = New-Object System.Drawing.Point(15, 15); $header.Controls.Add($lblH)
+    $lblInfo = New-Object System.Windows.Forms.Label
+    $lblInfo.Text = "Programa activacion/desactivacion automatica en horarios especificos."
+    $lblInfo.ForeColor = $script:Colors.Text; $lblInfo.AutoSize = $true
+    $lblInfo.Location = New-Object System.Drawing.Point(15, 70); $dlg.Controls.Add($lblInfo)
+    # Fila 1
+    $lbl1 = New-Object System.Windows.Forms.Label
+    $lbl1.Text = "Desactivar a las:"; $lbl1.ForeColor = $script:Colors.Text
+    $lbl1.Location = New-Object System.Drawing.Point(20, 110); $lbl1.Size = New-Object System.Drawing.Size(150, 25)
+    $dlg.Controls.Add($lbl1)
+    $dtpDisable = New-Object System.Windows.Forms.DateTimePicker
+    $dtpDisable.Format = "Time"; $dtpDisable.ShowUpDown = $true
+    $dtpDisable.Location = New-Object System.Drawing.Point(180, 108); $dtpDisable.Size = New-Object System.Drawing.Size(130, 25)
+    $dtpDisable.Value = (Get-Date).Date.AddHours(22)
+    $dlg.Controls.Add($dtpDisable)
+    $chkDisable = New-Object System.Windows.Forms.CheckBox
+    $chkDisable.Text = "Activar"; $chkDisable.Location = New-Object System.Drawing.Point(330, 108)
+    $chkDisable.Size = New-Object System.Drawing.Size(80, 25); $chkDisable.ForeColor = $script:Colors.Text
+    $dlg.Controls.Add($chkDisable)
+    # Fila 2
+    $lbl2 = New-Object System.Windows.Forms.Label
+    $lbl2.Text = "Activar a las:"; $lbl2.ForeColor = $script:Colors.Text
+    $lbl2.Location = New-Object System.Drawing.Point(20, 150); $lbl2.Size = New-Object System.Drawing.Size(150, 25)
+    $dlg.Controls.Add($lbl2)
+    $dtpEnable = New-Object System.Windows.Forms.DateTimePicker
+    $dtpEnable.Format = "Time"; $dtpEnable.ShowUpDown = $true
+    $dtpEnable.Location = New-Object System.Drawing.Point(180, 148); $dtpEnable.Size = New-Object System.Drawing.Size(130, 25)
+    $dtpEnable.Value = (Get-Date).Date.AddHours(7)
+    $dlg.Controls.Add($dtpEnable)
+    $chkEnable = New-Object System.Windows.Forms.CheckBox
+    $chkEnable.Text = "Activar"; $chkEnable.Location = New-Object System.Drawing.Point(330, 148)
+    $chkEnable.Size = New-Object System.Drawing.Size(80, 25); $chkEnable.ForeColor = $script:Colors.Text
+    $dlg.Controls.Add($chkEnable)
+    # Lista de tareas actuales
+    $lblTareas = New-Object System.Windows.Forms.Label
+    $lblTareas.Text = "Tareas actuales:"; $lblTareas.ForeColor = $script:Colors.Text
+    $lblTareas.Location = New-Object System.Drawing.Point(20, 200); $lblTareas.Size = New-Object System.Drawing.Size(200, 25)
+    $dlg.Controls.Add($lblTareas)
+    $lv = New-Object System.Windows.Forms.ListView
+    $lv.View = "Details"; $lv.FullRowSelect = $true; $lv.GridLines = $false
+    $lv.Font = New-Object System.Drawing.Font("Consolas", 9)
+    $lv.Location = New-Object System.Drawing.Point(20, 230); $lv.Size = New-Object System.Drawing.Size(580, 160)
+    $lv.BorderStyle = "FixedSingle"; $lv.BackColor = $script:Colors.BgSecondary; $lv.ForeColor = $script:Colors.Text
+    [void]$lv.Columns.Add("Nombre", 200); [void]$lv.Columns.Add("Estado", 100); [void]$lv.Columns.Add("Proxima ejecucion", 250)
+    foreach ($t in (Get-TrayTasks)) {
+        $it = New-Object System.Windows.Forms.ListViewItem($t.TaskName)
+        [void]$it.SubItems.Add($t.State); [void]$it.SubItems.Add(($t.Triggers | Select-Object -First 1).StartBoundary)
+        [void]$lv.Items.Add($it)
+    }
+    $dlg.Controls.Add($lv)
+    $btnGuardar = New-NeonButton "Guardar tareas" $script:Colors.AccentGreen $script:Colors.AccentGreenH 20 405 180 34
+    $btnEliminar = New-NeonButton "Eliminar todas" $script:Colors.AccentRed $script:Colors.AccentRedH 210 405 180 34
+    $btnCerr = New-NeonButton "Cerrar" $script:Colors.Neutral $script:Colors.TextMuted 420 405 180 34
+    $dlg.Controls.Add($btnGuardar); $dlg.Controls.Add($btnEliminar); $dlg.Controls.Add($btnCerr)
+    $btnGuardar.Add_Click({
+        $ok1 = $false; $ok2 = $false
+        if ($chkDisable.Checked) {
+            $hora = $dtpDisable.Value.ToString("HH:mm")
+            $ok1 = Register-TrayTask -Nombre "Desactivar" -Accion "disable" -Hora $hora
+        }
+        if ($chkEnable.Checked) {
+            $hora = $dtpEnable.Value.ToString("HH:mm")
+            $ok2 = Register-TrayTask -Nombre "Activar" -Accion "enable" -Hora $hora
+        }
+        [System.Windows.Forms.MessageBox]::Show("Tareas programadas.`nDesactivar: $ok1`nActivar: $ok2","Programador","OK","Information") | Out-Null
+    }.GetNewClosure())
+    $btnEliminar.Add_Click({
+        Unregister-TrayTask -Nombre "Desactivar" | Out-Null
+        Unregister-TrayTask -Nombre "Activar" | Out-Null
+        [System.Windows.Forms.MessageBox]::Show("Tareas eliminadas.","Programador","OK","Information") | Out-Null
+        $dlg.Close()
+    }.GetNewClosure())
+    $btnCerr.Add_Click({ $dlg.Close() }.GetNewClosure())
+    [void]$dlg.ShowDialog()
+    $dlg.Dispose()
+}
+
+# ==================================================================
+# 36. DIALOGO: FIRMAS
+# ==================================================================
+function Show-SignaturesDialog {
+    $dlg = New-Object System.Windows.Forms.Form
+    $dlg.Text = "Actualizar firmas"; $dlg.ClientSize = New-Object System.Drawing.Size(520, 240)
+    $dlg.StartPosition = "CenterScreen"; $dlg.FormBorderStyle = "FixedDialog"
+    $dlg.MaximizeBox = $false; $dlg.MinimizeBox = $false
+    $dlg.BackColor = $script:Colors.Bg; $dlg.Font = New-Object System.Drawing.Font("Segoe UI", 9)
+    $header = New-Object System.Windows.Forms.Panel
+    $header.Dock = "Top"; $header.Height = 55; $header.BackColor = $script:Colors.AccentCyan
+    $dlg.Controls.Add($header)
+    $lblH = New-Object System.Windows.Forms.Label
+    $lblH.Text = "ACTUALIZAR FIRMAS"; $lblH.Font = New-Object System.Drawing.Font("Consolas", 12, [System.Drawing.FontStyle]::Bold)
+    $lblH.ForeColor = [System.Drawing.Color]::White; $lblH.BackColor = [System.Drawing.Color]::Transparent
+    $lblH.AutoSize = $true; $lblH.Location = New-Object System.Drawing.Point(15, 15); $header.Controls.Add($lblH)
+    $lblInfo = New-Object System.Windows.Forms.Label
+    $lblInfo.Text = "Descarga las ultimas firmas de Windows Defender desde Microsoft."
+    $lblInfo.ForeColor = $script:Colors.Text; $lblInfo.AutoSize = $true
+    $lblInfo.Location = New-Object System.Drawing.Point(15, 75); $dlg.Controls.Add($lblInfo)
+    $progBar = New-Object System.Windows.Forms.ProgressBar
+    $progBar.Location = New-Object System.Drawing.Point(20, 110); $progBar.Size = New-Object System.Drawing.Size(480, 25)
+    $progBar.Style = "Continuous"; $progBar.Value = 0
+    $dlg.Controls.Add($progBar)
+    $lblStatus = New-Object System.Windows.Forms.Label
+    $lblStatus.Text = "Listo para actualizar"; $lblStatus.ForeColor = $script:Colors.TextMuted
+    $lblStatus.Location = New-Object System.Drawing.Point(20, 140); $lblStatus.Size = New-Object System.Drawing.Size(480, 25)
+    $dlg.Controls.Add($lblStatus)
+    $btnUpd = New-NeonButton "Actualizar ahora" $script:Colors.AccentGreen $script:Colors.AccentGreenH 20 175 200 34
+    $btnCerr = New-NeonButton "Cerrar" $script:Colors.Neutral $script:Colors.TextMuted 320 175 180 34
+    $dlg.Controls.Add($btnUpd); $dlg.Controls.Add($btnCerr)
+    $btnUpd.Add_Click({
+        $lblStatus.Text = "Actualizando firmas, espere por favor..."
+        $lblStatus.ForeColor = $script:Colors.Warn
+        [System.Windows.Forms.Application]::DoEvents()
+        $r = Update-DefenderSignatures -ProgressBar $progBar
+        $lblStatus.Text = $r
+        $lblStatus.ForeColor = $script:Colors.Ok
+        Add-History -Accion "Update Firmas" -Resultado "OK" -Segundos 0
+    }.GetNewClosure())
+    $btnCerr.Add_Click({ $dlg.Close() }.GetNewClosure())
+    [void]$dlg.ShowDialog()
+    $dlg.Dispose()
+}
+
+# ==================================================================
+# 37. DIALOGO: DIAGNOSTICO
+# ==================================================================
+function Show-DiagnosticsDialog {
+    $dlg = New-Object System.Windows.Forms.Form
+    $dlg.Text = "Diagnostico del sistema"; $dlg.ClientSize = New-Object System.Drawing.Size(680, 520)
+    $dlg.StartPosition = "CenterScreen"; $dlg.FormBorderStyle = "FixedDialog"
+    $dlg.MaximizeBox = $false; $dlg.MinimizeBox = $false
+    $dlg.BackColor = $script:Colors.Bg; $dlg.Font = New-Object System.Drawing.Font("Segoe UI", 9)
+    $header = New-Object System.Windows.Forms.Panel
+    $header.Dock = "Top"; $header.Height = 55; $header.BackColor = $script:Colors.AccentAmber
+    $dlg.Controls.Add($header)
+    $lblH = New-Object System.Windows.Forms.Label
+    $lblH.Text = "DIAGNOSTICO"; $lblH.Font = New-Object System.Drawing.Font("Consolas", 12, [System.Drawing.FontStyle]::Bold)
+    $lblH.ForeColor = [System.Drawing.Color]::White; $lblH.BackColor = [System.Drawing.Color]::Transparent
+    $lblH.AutoSize = $true; $lblH.Location = New-Object System.Drawing.Point(15, 15); $header.Controls.Add($lblH)
+    $lv = New-Object System.Windows.Forms.ListView
+    $lv.View = "Details"; $lv.FullRowSelect = $true; $lv.GridLines = $false
+    $lv.Font = New-Object System.Drawing.Font("Consolas", 9)
+    $lv.Location = New-Object System.Drawing.Point(15, 70); $lv.Size = New-Object System.Drawing.Size(650, 400)
+    $lv.BorderStyle = "FixedSingle"; $lv.BackColor = $script:Colors.BgSecondary; $lv.ForeColor = $script:Colors.Text
+    [void]$lv.Columns.Add("Componente", 200); [void]$lv.Columns.Add("Estado", 100); [void]$lv.Columns.Add("Detalle", 340)
+    foreach ($d in (Get-DiagnosticReport)) {
+        $it = New-Object System.Windows.Forms.ListViewItem($d.Item)
+        [void]$it.SubItems.Add($d.Status); [void]$it.SubItems.Add($d.Detail)
+        $it.ForeColor = $d.Color
+        [void]$lv.Items.Add($it)
+    }
+    $dlg.Controls.Add($lv)
+    $btnCerr = New-NeonButton "Cerrar" $script:Colors.Neutral $script:Colors.TextMuted 545 480 120 30
+    $dlg.Controls.Add($btnCerr)
+    $btnCerr.Add_Click({ $dlg.Close() }.GetNewClosure())
+    [void]$dlg.ShowDialog()
+    $dlg.Dispose()
+}
+
+# ==================================================================
+# 38. DIALOGO: CONFIGURACION
+# ==================================================================
+function Show-SettingsDialog {
+    $dlg = New-Object System.Windows.Forms.Form
+    $dlg.Text = "Configuracion"; $dlg.ClientSize = New-Object System.Drawing.Size(520, 460)
+    $dlg.StartPosition = "CenterScreen"; $dlg.FormBorderStyle = "FixedDialog"
+    $dlg.MaximizeBox = $false; $dlg.MinimizeBox = $false
+    $dlg.BackColor = $script:Colors.Bg; $dlg.Font = New-Object System.Drawing.Font("Segoe UI", 9)
+    $header = New-Object System.Windows.Forms.Panel
+    $header.Dock = "Top"; $header.Height = 55; $header.BackColor = $script:Colors.AccentBlue
+    $dlg.Controls.Add($header)
+    $lblH = New-Object System.Windows.Forms.Label
+    $lblH.Text = "CONFIGURACION"; $lblH.Font = New-Object System.Drawing.Font("Consolas", 12, [System.Drawing.FontStyle]::Bold)
+    $lblH.ForeColor = [System.Drawing.Color]::White; $lblH.BackColor = [System.Drawing.Color]::Transparent
+    $lblH.AutoSize = $true; $lblH.Location = New-Object System.Drawing.Point(15, 15); $header.Controls.Add($lblH)
+    $chkDark = New-Object System.Windows.Forms.CheckBox
+    $chkDark.Text = "Tema oscuro"; $chkDark.Checked = $script:DarkTheme
+    $chkDark.Location = New-Object System.Drawing.Point(20, 80); $chkDark.Size = New-Object System.Drawing.Size(400, 25)
+    $chkDark.ForeColor = $script:Colors.Text; $dlg.Controls.Add($chkDark)
+    $chkAuto = New-Object System.Windows.Forms.CheckBox
+    $chkAuto.Text = "Iniciar con Windows"; $chkAuto.Checked = (Get-AutoStartEnabled)
+    $chkAuto.Location = New-Object System.Drawing.Point(20, 115); $chkAuto.Size = New-Object System.Drawing.Size(400, 25)
+    $chkAuto.ForeColor = $script:Colors.Text; $dlg.Controls.Add($chkAuto)
+    $chkPortable = New-Object System.Windows.Forms.CheckBox
+    $chkPortable.Text = "Modo portable (guardar datos junto al script)"; $chkPortable.Checked = $script:PortableMode
+    $chkPortable.Location = New-Object System.Drawing.Point(20, 150); $chkPortable.Size = New-Object System.Drawing.Size(400, 25)
+    $chkPortable.ForeColor = $script:Colors.Text; $chkPortable.Enabled = $false
+    $dlg.Controls.Add($chkPortable)
+    $chkKiosk = New-Object System.Windows.Forms.CheckBox
+    $chkKiosk.Text = "Modo kiosco (pedir contrasena al abrir)"; $chkKiosk.Checked = $script:IsKioskMode
+    $chkKiosk.Location = New-Object System.Drawing.Point(20, 185); $chkKiosk.Size = New-Object System.Drawing.Size(400, 25)
+    $chkKiosk.ForeColor = $script:Colors.Text; $dlg.Controls.Add($chkKiosk)
+    $lblPwd = New-Object System.Windows.Forms.Label
+    $lblPwd.Text = "Contrasena:"; $lblPwd.ForeColor = $script:Colors.Text
+    $lblPwd.Location = New-Object System.Drawing.Point(40, 220); $lblPwd.Size = New-Object System.Drawing.Size(120, 25)
+    $dlg.Controls.Add($lblPwd)
+    $txtPwd = New-Object System.Windows.Forms.TextBox
+    $txtPwd.PasswordChar = '*'; $txtPwd.Location = New-Object System.Drawing.Point(160, 218); $txtPwd.Size = New-Object System.Drawing.Size(300, 25)
+    $txtPwd.BackColor = $script:Colors.BgSecondary; $txtPwd.ForeColor = $script:Colors.Text
+    $txtPwd.BorderStyle = "FixedSingle"; $txtPwd.Enabled = $script:IsKioskMode
+    $dlg.Controls.Add($txtPwd)
+    $lblLang = New-Object System.Windows.Forms.Label
+    $lblLang.Text = "Idioma:"; $lblLang.ForeColor = $script:Colors.Text
+    $lblLang.Location = New-Object System.Drawing.Point(20, 260); $lblLang.Size = New-Object System.Drawing.Size(120, 25)
+    $dlg.Controls.Add($lblLang)
+    $cmbLang = New-Object System.Windows.Forms.ComboBox
+    $cmbLang.Items.AddRange(@("ES","EN")); $cmbLang.SelectedItem = $script:Lang
+    $cmbLang.Location = New-Object System.Drawing.Point(160, 258); $cmbLang.Size = New-Object System.Drawing.Size(100, 25)
+    $cmbLang.BackColor = $script:Colors.BgSecondary; $cmbLang.ForeColor = $script:Colors.Text
+    $cmbLang.FlatStyle = "Flat"; $dlg.Controls.Add($cmbLang)
+    $btnRestore = New-NeonButton "Restaurar valores" $script:Colors.AccentRed $script:Colors.AccentRedH 20 320 200 34
+    $btnSave = New-NeonButton "Guardar" $script:Colors.AccentGreen $script:Colors.AccentGreenH 240 320 180 34
+    $btnCerr = New-NeonButton "Cerrar" $script:Colors.Neutral $script:Colors.TextMuted 240 370 180 34
+    $dlg.Controls.Add($btnRestore); $dlg.Controls.Add($btnSave); $dlg.Controls.Add($btnCerr)
+    $chkKiosk.Add_CheckedChanged({ $txtPwd.Enabled = $chkKiosk.Checked }.GetNewClosure())
+    $btnSave.Add_Click({
+        $script:DarkTheme = $chkDark.Checked
+        $script:Lang = $cmbLang.SelectedItem
+        $script:IsKioskMode = $chkKiosk.Checked
+        if ($chkKiosk.Checked -and -not [string]::IsNullOrEmpty($txtPwd.Text)) {
+            $script:AppConfig.KioskHash = Get-StringHash $txtPwd.Text
+        }
+        Set-AutoStart -Enable $chkAuto.Checked | Out-Null
+        Save-AppConfig
+        Refresh-Palette
+        [System.Windows.Forms.MessageBox]::Show("Configuracion guardada.`nReabre el panel para aplicar el tema.","OK","OK","Information") | Out-Null
+    }.GetNewClosure())
+    $btnRestore.Add_Click({
+        if ([System.Windows.Forms.MessageBox]::Show("Restaurar todos los valores por defecto?","Confirmar","YesNo","Warning") -eq "Yes") {
+            $script:AppConfig.DarkTheme = $true; $script:AppConfig.Lang = "ES"; $script:AppConfig.KioskMode = $false
+            $script:AppConfig.KioskHash = ""; $script:AppConfig.AutoStart = $false
+            Set-AutoStart -Enable $false | Out-Null; Save-AppConfig
+            [System.Windows.Forms.MessageBox]::Show("Valores restaurados.","OK","OK","Information") | Out-Null
+        }
+    }.GetNewClosure())
+    $btnCerr.Add_Click({ $dlg.Close() }.GetNewClosure())
+    [void]$dlg.ShowDialog()
+    $dlg.Dispose()
+}
+
+# ==================================================================
+# 39. DIALOGO: AYUDA
+# ==================================================================
+function Show-HelpDialog {
+    $dlg = New-Object System.Windows.Forms.Form
+    $dlg.Text = "Ayuda"; $dlg.ClientSize = New-Object System.Drawing.Size(760, 600)
+    $dlg.StartPosition = "CenterScreen"; $dlg.FormBorderStyle = "FixedDialog"
+    $dlg.MaximizeBox = $false; $dlg.MinimizeBox = $false
+    $dlg.BackColor = $script:Colors.Bg; $dlg.Font = New-Object System.Drawing.Font("Segoe UI", 9)
+    $dlg.Icon = $script:IconOk
+    $header = New-Object System.Windows.Forms.Panel
+    $header.Dock = "Top"; $header.Height = 55; $header.BackColor = $script:Colors.AccentBlue
+    $dlg.Controls.Add($header)
+    $lblH = New-Object System.Windows.Forms.Label
+    $lblH.Text = "AYUDA"; $lblH.Font = New-Object System.Drawing.Font("Consolas", 14, [System.Drawing.FontStyle]::Bold)
+    $lblH.ForeColor = [System.Drawing.Color]::White; $lblH.BackColor = [System.Drawing.Color]::Transparent
+    $lblH.AutoSize = $true; $lblH.Location = New-Object System.Drawing.Point(15, 15); $header.Controls.Add($lblH)
+    $tabs = New-Object System.Windows.Forms.TabControl
+    $tabs.Dock = "Fill"; $tabs.Font = New-Object System.Drawing.Font("Segoe UI", 9)
+    $dlg.Controls.Add($tabs)
+    $dlg.Controls.SetChildIndex($tabs, 0)
+
+    function New-HelpTab($titulo, $texto) {
+        $t = New-Object System.Windows.Forms.TabPage
+        $t.Text = $titulo; $t.BackColor = $script:Colors.Bg; $t.Padding = New-Object System.Windows.Forms.Padding(15)
+        $tb = New-Object System.Windows.Forms.TextBox
+        $tb.Multiline = $true; $tb.ReadOnly = $true; $tb.ScrollBars = "Vertical"
+        $tb.Dock = "Fill"; $tb.BorderStyle = "None"
+        $tb.BackColor = $script:Colors.Bg; $tb.ForeColor = $script:Colors.Text
+        $tb.Font = New-Object System.Drawing.Font("Consolas", 9)
+        $tb.Text = $texto
+        $t.Controls.Add($tb)
+        return $t
+    }
+    [void]$tabs.TabPages.Add((New-HelpTab "Introduccion" @"
+CONTROL DE SEGURIDAD - v4.0
+=============================
+
+Aplicacion de bandeja para gestionar Windows Defender.
+Interfaz futurista con multiples herramientas profesionales.
+
+CARACTERISTICAS PRINCIPALES
+----------------------------
+- Activar / Desactivar Defender (agresivo).
+- Verificacion completa de 18 modulos.
+- Perfiles: Gaming, Desarrollo, Maxima Seguridad.
+- Backup / Restore a JSON.
+- Programador de tareas (scheduler).
+- Actualizacion de firmas con progreso.
+- Visor de eventos del sistema.
+- Grafico de estadisticas de uso.
+- Diagnostico del sistema (8 comprobaciones).
+- Modo kiosco con contrasena.
+- Modo portable.
+- Multi-idioma (ES/EN).
+- Autostart con Windows.
+
+UBICACION
+---------
+Icono de escudo junto al reloj (bandeja del sistema).
+
+ACCESOS
+-------
+Clic IZQUIERDO  ->  Abre el panel.
+Clic DERECHO    ->  Menu contextual completo.
+"@))
+    [void]$tabs.TabPages.Add((New-HelpTab "Estados" @"
+ESTADOS DE WINDOWS DEFENDER
+============================
+
+[VERDE] ACTIVADO
+Servicio corriendo + RTP activo + Sin politicas bloqueantes.
+
+[NARANJA] PROTECCION PARCIAL
+Servicio corre pero RTP o politica bloquean la proteccion real.
+
+[ROJO] DESACTIVADO
+Servicio detenido + RTP off + Politicas de bloqueo presentes.
+
+[GRIS] DESCONOCIDO
+No se puede consultar. Pulsa VERIFICAR ESTADO.
+
+ACCIONES RECOMENDADAS
+---------------------
+- ACTIVADO    -> Puedes desactivar o verificar.
+- PARCIAL     -> Desactiva y reinicia el equipo.
+- DESACTIVADO -> Pulsa ACTIVAR para restaurar.
+"@))
+    [void]$tabs.TabPages.Add((New-HelpTab "Botones" @"
+BOTONES DEL PANEL
+=================
+
+VERIFICAR ESTADO COMPLETO
+  Abre diagnostico detallado de 18 modulos.
+
+ACTIVAR PROTECCION
+  Restaura servicios + politicas + RTP.
+  Abre dialogo con opciones avanzadas.
+
+DESACTIVAR PROTECCION
+  Desactivacion agresiva de 7 pasos.
+
+HISTORIAL
+  Ultimas 20 operaciones con exportacion CSV.
+
+PERFILES
+  Gaming / Desarrollo / Maxima Seguridad.
+
+PROGRAMADOR
+  Tareas automaticas a horas especificas.
+
+BACKUP
+  Exportar / importar configuracion.
+
+ACTUALIZAR FIRMAS
+  Descarga firmas de Microsoft.
+
+EVENTOS
+  Log del sistema (ultimas 100 entradas).
+
+ESTADISTICAS
+  Grafico de operaciones por dia.
+
+DIAGNOSTICO
+  8 comprobaciones del sistema.
+
+AYUDA (F1)
+  Esta ventana.
+
+CONFIGURACION
+  Tema, idioma, autostart, kiosco.
+
+ACERCA DE
+  Informacion de la version.
+
+SALIR
+  Cierra el panel.
+"@))
+    [void]$tabs.TabPages.Add((New-HelpTab "Atajos" @"
+ATAJOS DE TECLADO
+=================
+
+F1      Ayuda
+F5      Refrescar estado
+Ctrl+R  Refrescar estado
+Esc     Cerrar panel
+
+MENU CONTEXTUAL
+===============
+Panel, Verificar, Historial, Perfiles, Programador, Backup,
+Firmas, Eventos, Chart, Diagnostico, Ayuda, Configuracion,
+Activar, Desactivar, Log, Tema, Autostart, Acerca, Salir.
+"@))
+    [void]$tabs.TabPages.Add((New-HelpTab "Problemas" @"
+SOLUCION DE PROBLEMAS
+=====================
+
+TAMPER PROTECTION ACTIVA
+  Desactivala en Seguridad de Windows -> Proteccion antivirus ->
+  Administrar la configuracion -> Proteccion contra alteraciones.
+
+DESACTIVACION PARCIAL
+  Windows 11 reinicia WinDefend automaticamente.
+  Solucion: REINICIA EL EQUIPO.
+
+ACTIVACION PARCIAL
+  1. Pulsa DESACTIVAR.
+  2. Pulsa ACTIVAR.
+  3. Si persiste, reinicia el equipo.
+
+ICONO NO APARECE
+  Arrastra desde la flecha "^" junto al reloj.
+
+NO RESPONDE
+  Ejecuta el script como Administrador.
+
+SCRIPT BLOQUEADO POR WINDOWS
+  Abre PowerShell como Admin y ejecuta:
+  Set-ExecutionPolicy Bypass -Scope Process
+"@))
+    $btnCerr = New-NeonButton "Cerrar (Esc)" $script:Colors.Neutral $script:Colors.TextMuted 605 560 140 30
+    $dlg.Controls.Add($btnCerr); $btnCerr.BringToFront()
+    $dlg.KeyPreview = $true
+    $dlg.Add_KeyDown({ param($s,$e); if ($e.KeyCode -eq [System.Windows.Forms.Keys]::Escape) { $dlg.Close() } }.GetNewClosure())
+    $btnCerr.Add_Click({ $dlg.Close() }.GetNewClosure())
+    [void]$dlg.ShowDialog()
+    $dlg.Dispose()
+}
+
+# ==================================================================
+# 40. DIALOGO: ASISTENTE PRIMERA EJECUCION
+# ==================================================================
+function Show-FirstRunWizard {
+    $dlg = New-Object System.Windows.Forms.Form
+    $dlg.Text = "Bienvenido - Control de Seguridad de Windows"
+    $dlg.ClientSize = New-Object System.Drawing.Size(560, 540)
+    $dlg.StartPosition = "CenterScreen"; $dlg.FormBorderStyle = "FixedDialog"
+    $dlg.MaximizeBox = $false; $dlg.MinimizeBox = $false
+    $dlg.BackColor = $script:Colors.Bg; $dlg.Font = New-Object System.Drawing.Font("Segoe UI", 9)
+    $dlg.Icon = $script:IconOk
+    $header = New-Object System.Windows.Forms.Panel
+    $header.Dock = "Top"; $header.Height = 75; $header.BackColor = $script:Colors.AccentCyan
+    $dlg.Controls.Add($header)
+    $lblH = New-Object System.Windows.Forms.Label
+    $lblH.Text = "BIENVENIDO"; $lblH.Font = New-Object System.Drawing.Font("Consolas", 18, [System.Drawing.FontStyle]::Bold)
+    $lblH.ForeColor = [System.Drawing.Color]::White; $lblH.BackColor = [System.Drawing.Color]::Transparent
+    $lblH.AutoSize = $true; $lblH.Location = New-Object System.Drawing.Point(20, 12); $header.Controls.Add($lblH)
+    $lblSub = New-Object System.Windows.Forms.Label
+    $lblSub.Text = "Control de Seguridad de Windows Defender v4.0"
+    $lblSub.Font = New-Object System.Drawing.Font("Segoe UI", 9, [System.Drawing.FontStyle]::Italic)
+    $lblSub.ForeColor = [System.Drawing.Color]::FromArgb(230, 250, 255); $lblSub.BackColor = [System.Drawing.Color]::Transparent
+    $lblSub.AutoSize = $true; $lblSub.Location = New-Object System.Drawing.Point(22, 45); $header.Controls.Add($lblSub)
+    $txt = New-Object System.Windows.Forms.TextBox
+    $txt.Multiline = $true; $txt.ReadOnly = $true; $txt.ScrollBars = "Vertical"
+    $txt.Location = New-Object System.Drawing.Point(20, 90); $txt.Size = New-Object System.Drawing.Size(520, 320)
+    $txt.BorderStyle = "FixedSingle"
+    $txt.BackColor = $script:Colors.BgSecondary; $txt.ForeColor = $script:Colors.Text
+    $txt.Font = New-Object System.Drawing.Font("Consolas", 9)
+    $txt.Text = @"
+BIENVENIDO A LA VERSION 4.0
+============================
+
+Esta aplicacion controla Windows Defender desde la bandeja
+del sistema con una interfaz futurista y decenas de funciones.
+
+QUE HACE
+--------
+  * Activar / Desactivar Windows Defender.
+  * Verificar 18 modulos en detalle.
+  * Aplicar perfiles (Gaming / Desarrollo / Maxima).
+  * Programar tareas automaticas.
+  * Actualizar firmas, ver eventos, diagnostico.
+  * Modo kiosco, portable, multi-idioma.
+
+DONDE ESTA
+----------
+Busca el ESCUDO junto al reloj. Si no lo ves, pulsa "^".
+
+COMO SE USA
+-----------
+  * Clic IZQUIERDO  ->  Abre el panel.
+  * Clic DERECHO    ->  Menu contextual completo.
+  * F1 dentro del panel  ->  Ayuda completa.
+  * F5  ->  Refrescar.
+  * Esc ->  Cerrar.
+
+CONSEJOS
+--------
+  * Ejecuta como Administrador.
+  * Antes de DESACTIVAR crea un punto de restauracion.
+  * Si la desactivacion queda parcial, reinicia el equipo.
+  * Usa "Configuracion" para activar modo oscuro/kiosco.
+
+(c) 2026 - Ing. Yosvany Hernandez Quintero
+"@
+    $dlg.Controls.Add($txt)
+    $chkNo = New-Object System.Windows.Forms.CheckBox
+    $chkNo.Text = "No volver a mostrar este mensaje"; $chkNo.Checked = $true
+    $chkNo.Location = New-Object System.Drawing.Point(20, 425); $chkNo.Size = New-Object System.Drawing.Size(300, 25)
+    $chkNo.ForeColor = $script:Colors.Text; $dlg.Controls.Add($chkNo)
+    $btnAyuda = New-NeonButton "Ver ayuda completa" $script:Colors.AccentBlue $script:Colors.AccentBlueH 20 460 220 40
+    $btnEnt = New-NeonButton "Entendido" $script:Colors.AccentGreen $script:Colors.AccentGreenH 340 460 200 40
+    $dlg.Controls.Add($btnAyuda); $dlg.Controls.Add($btnEnt)
+    $lblPie = New-Object System.Windows.Forms.Label
+    $lblPie.Text = "Esta guia tambien estara disponible via F1."
+    $lblPie.Font = New-Object System.Drawing.Font("Segoe UI", 8, [System.Drawing.FontStyle]::Italic)
+    $lblPie.ForeColor = $script:Colors.TextMuted
+    $lblPie.Location = New-Object System.Drawing.Point(20, 510); $lblPie.Size = New-Object System.Drawing.Size(400, 20)
+    $dlg.Controls.Add($lblPie)
+    $btnEnt.Add_Click({
+        if ($chkNo.Checked) { $script:AppConfig.FirstRunDone = $true; Save-AppConfig }
+        $dlg.Close()
+    }.GetNewClosure())
+    $btnAyuda.Add_Click({
+        if ($chkNo.Checked) { $script:AppConfig.FirstRunDone = $true; Save-AppConfig }
+        Show-HelpDialog
+        $dlg.Close()
+    }.GetNewClosure())
+    [void]$dlg.ShowDialog()
+    $dlg.Dispose()
+}
+
+# ==================================================================
+# 41. DIALOGO: OPCIONES AVANZADAS ACTIVACION
+# ==================================================================
+function Show-AdvancedActivationDialog {
+    $dlg = New-Object System.Windows.Forms.Form
+    $dlg.Text = "Opciones de activacion"; $dlg.ClientSize = New-Object System.Drawing.Size(460, 420)
+    $dlg.StartPosition = "CenterScreen"; $dlg.FormBorderStyle = "FixedDialog"
+    $dlg.MaximizeBox = $false; $dlg.MinimizeBox = $false
+    $dlg.BackColor = $script:Colors.Bg; $dlg.Font = New-Object System.Drawing.Font("Segoe UI", 9)
+    $dlg.Icon = $script:IconOk
+    $header = New-Object System.Windows.Forms.Panel
+    $header.Dock = "Top"; $header.Height = 55; $header.BackColor = $script:Colors.AccentGreen
+    $dlg.Controls.Add($header)
+    $lblH = New-Object System.Windows.Forms.Label
+    $lblH.Text = "OPCIONES AVANZADAS"; $lblH.Font = New-Object System.Drawing.Font("Consolas", 12, [System.Drawing.FontStyle]::Bold)
+    $lblH.ForeColor = [System.Drawing.Color]::White; $lblH.BackColor = [System.Drawing.Color]::Transparent
+    $lblH.AutoSize = $true; $lblH.Location = New-Object System.Drawing.Point(15, 15); $header.Controls.Add($lblH)
+    $lblInfo = New-Object System.Windows.Forms.Label
+    $lblInfo.Text = "Servicios adicionales a activar:"; $lblInfo.ForeColor = $script:Colors.Text
+    $lblInfo.AutoSize = $true; $lblInfo.Location = New-Object System.Drawing.Point(15, 70); $dlg.Controls.Add($lblInfo)
+    $cloud = -1; $samples = -1; $tamper = $false
+    try {
+        if (Get-Command Get-MpPreference -ErrorAction SilentlyContinue) {
+            $p = Get-MpPreference -ErrorAction SilentlyContinue
+            if ($p) { $cloud = [int]$p.MAPSReporting; $samples = [int]$p.SubmitSamplesConsent }
+        }
+        if (Get-Command Get-MpComputerStatus -ErrorAction SilentlyContinue) { $tamper = (Get-MpComputerStatus -ErrorAction Stop).IsTamperProtected }
+    } catch { }
+    $chkCloud = New-Object System.Windows.Forms.CheckBox
+    $chkCloud.Text = "Nube (MAPS Advanced)"; $chkCloud.Location = New-Object System.Drawing.Point(20, 100)
+    $chkCloud.Size = New-Object System.Drawing.Size(420, 25); $chkCloud.ForeColor = $script:Colors.Text
+    if ($cloud -eq 2) { $chkCloud.Checked = $true; $chkCloud.Enabled = $false; $chkCloud.Text += "  [ya activo]"; $chkCloud.ForeColor = $script:Colors.TextMuted } else { $chkCloud.Checked = $true }
+    $dlg.Controls.Add($chkCloud)
+    $chkSamp = New-Object System.Windows.Forms.CheckBox
+    $chkSamp.Text = "Envio de muestras (Safe)"; $chkSamp.Location = New-Object System.Drawing.Point(20, 145)
+    $chkSamp.Size = New-Object System.Drawing.Size(420, 25); $chkSamp.ForeColor = $script:Colors.Text
+    if ($samples -in 1,3) { $chkSamp.Checked = $true; $chkSamp.Enabled = $false; $chkSamp.Text += "  [ya activo]"; $chkSamp.ForeColor = $script:Colors.TextMuted } else { $chkSamp.Checked = $true }
+    $dlg.Controls.Add($chkSamp)
+    $chkTamper = New-Object System.Windows.Forms.CheckBox
+    $chkTamper.Text = "Tamper Protection"; $chkTamper.Location = New-Object System.Drawing.Point(20, 190)
+    $chkTamper.Size = New-Object System.Drawing.Size(420, 25); $chkTamper.ForeColor = $script:Colors.Text
+    if ($tamper) { $chkTamper.Checked = $true; $chkTamper.Enabled = $false; $chkTamper.Text += "  [ya activo]"; $chkTamper.ForeColor = $script:Colors.TextMuted } else { $chkTamper.Checked = $true }
+    $dlg.Controls.Add($chkTamper)
+    $lblNota = New-Object System.Windows.Forms.Label
+    $lblNota.Text = "Nota: Microsoft puede requerir activar Tamper manualmente."
+    $lblNota.Font = New-Object System.Drawing.Font("Segoe UI", 8, [System.Drawing.FontStyle]::Italic)
+    $lblNota.ForeColor = $script:Colors.Warn; $lblNota.AutoSize = $true
+    $lblNota.Location = New-Object System.Drawing.Point(20, 230); $dlg.Controls.Add($lblNota)
+    $btnOk = New-NeonButton "Aceptar y Activar" $script:Colors.AccentGreen $script:Colors.AccentGreenH 20 340 220 38
+    $btnCancel = New-NeonButton "Cancelar" $script:Colors.Neutral $script:Colors.TextMuted 260 340 180 38
+    $dlg.Controls.Add($btnOk); $dlg.Controls.Add($btnCancel)
+    $script:DlgResult = [PSCustomObject]@{ Apply=$false; EnableCloud=$false; EnableSamples=$false; EnableTamper=$false }
+    $btnOk.Add_Click({
+        $script:DlgResult = [PSCustomObject]@{
+            Apply=$true
+            EnableCloud = ($chkCloud.Enabled -and $chkCloud.Checked)
+            EnableSamples = ($chkSamp.Enabled -and $chkSamp.Checked)
+            EnableTamper = ($chkTamper.Enabled -and $chkTamper.Checked)
+        }
+        $dlg.Close()
+    }.GetNewClosure())
+    $btnCancel.Add_Click({ $script:DlgResult = [PSCustomObject]@{ Apply=$false; EnableCloud=$false; EnableSamples=$false; EnableTamper=$false }; $dlg.Close() }.GetNewClosure())
+    [void]$dlg.ShowDialog()
+    $dlg.Dispose()
+    return $script:DlgResult
+}
+
+# ==================================================================
+# 42. VISOR DE LOG
+# ==================================================================
+function Update-LogViewContent {
+    param([System.Windows.Forms.TextBox]$TextBox)
+    if ($null -eq $TextBox -or $TextBox.IsDisposed) { return }
+    if (Test-Path $script:LogFile) {
+        $c = Get-Content -Path $script:LogFile -Raw -ErrorAction SilentlyContinue
+        $TextBox.Text = if ([string]::IsNullOrEmpty($c)) { "(Vacio)" } else { $c }
+    } else { $TextBox.Text = "(Sin log todavia)" }
+    $TextBox.SelectionStart = $TextBox.Text.Length; $TextBox.ScrollToCaret()
+}
+function Show-LogViewer {
+    $frm = New-Object System.Windows.Forms.Form
+    $frm.Text = "Log"; $frm.ClientSize = New-Object System.Drawing.Size(780, 540)
+    $frm.StartPosition = "CenterScreen"; $frm.Icon = $script:IconOk
+    $frm.BackColor = $script:Colors.Bg; $frm.Font = New-Object System.Drawing.Font("Segoe UI", 9)
+    $pHead = New-Object System.Windows.Forms.Panel
+    $pHead.Dock = "Top"; $pHead.Height = 50; $pHead.BackColor = $script:Colors.AccentCyan
+    $frm.Controls.Add($pHead)
+    $lbl = New-Object System.Windows.Forms.Label
+    $lbl.Text = "REGISTRO"; $lbl.Font = New-Object System.Drawing.Font("Consolas", 12, [System.Drawing.FontStyle]::Bold)
+    $lbl.ForeColor = [System.Drawing.Color]::White; $lbl.BackColor = [System.Drawing.Color]::Transparent
+    $lbl.AutoSize = $true; $lbl.Location = New-Object System.Drawing.Point(15, 13); $pHead.Controls.Add($lbl)
+    $txt = New-Object System.Windows.Forms.TextBox
+    $txt.Multiline = $true; $txt.ScrollBars = "Both"; $txt.ReadOnly = $true
+    $txt.WordWrap = $false; $txt.Dock = "Fill"
+    $txt.Font = New-Object System.Drawing.Font("Consolas", 9)
+    $txt.BackColor = [System.Drawing.Color]::FromArgb(15, 20, 32)
+    $txt.ForeColor = [System.Drawing.Color]::FromArgb(0, 229, 180)
+    $txt.BorderStyle = "None"
+    $pBody = New-Object System.Windows.Forms.Panel
+    $pBody.Dock = "Fill"; $pBody.Padding = New-Object System.Windows.Forms.Padding(10)
+    $pBody.Controls.Add($txt); $frm.Controls.Add($pBody); $pBody.BringToFront()
+    $pBot = New-Object System.Windows.Forms.Panel
+    $pBot.Dock = "Bottom"; $pBot.Height = 55; $pBot.BackColor = $script:Colors.Bg
+    $frm.Controls.Add($pBot)
+    $btnR = New-NeonButton "Refrescar" $script:Colors.AccentCyan $script:Colors.AccentCyanH 15 10 110 34
+    $btnS = New-NeonButton "Guardar" $script:Colors.AccentGreen $script:Colors.AccentGreenH 135 10 110 34
+    $btnC = New-NeonButton "CSV" $script:Colors.AccentPurple $script:Colors.AccentPurpH 255 10 110 34
+    $btnO = New-NeonButton "Carpeta" $script:Colors.AccentBlue $script:Colors.AccentBlueH 375 10 110 34
+    $btnX = New-NeonButton "Cerrar" $script:Colors.Neutral $script:Colors.TextMuted 645 10 120 34
+    $btnX.Anchor = "Top,Right"
+    $pBot.Controls.Add($btnR); $pBot.Controls.Add($btnS); $pBot.Controls.Add($btnC); $pBot.Controls.Add($btnO); $pBot.Controls.Add($btnX)
+    Update-LogViewContent -TextBox $txt
+    $btnR.Add_Click({ Update-LogViewContent -TextBox $txt }.GetNewClosure())
+    $btnS.Add_Click({
+        $sd = New-Object System.Windows.Forms.SaveFileDialog
+        $sd.Filter = "Texto (*.txt)|*.txt"; $sd.FileName = "Log_{0:yyyyMMdd_HHmmss}.txt" -f (Get-Date)
+        if ($sd.ShowDialog() -eq "OK") {
+            if (Test-Path $script:LogFile) { Copy-Item $script:LogFile $sd.FileName -Force }
+            else { $txt.Text | Out-File $sd.FileName -Encoding UTF8 }
+            [System.Windows.Forms.MessageBox]::Show("Guardado.","OK","OK","Information") | Out-Null
+        }
+    }.GetNewClosure())
+    $btnC.Add_Click({
+        $sd = New-Object System.Windows.Forms.SaveFileDialog
+        $sd.Filter = "CSV (*.csv)|*.csv"; $sd.FileName = "Eventos_{0:yyyyMMdd_HHmmss}.csv" -f (Get-Date)
+        if ($sd.ShowDialog() -eq "OK") {
+            $sb = New-Object System.Text.StringBuilder
+            [void]$sb.AppendLine('"Fecha","Accion","Resultado","Segundos"')
+            foreach ($e in $script:EventHistory) { [void]$sb.AppendLine('"{0:yyyy-MM-dd HH:mm:ss}","{1}","{2}","{3:N2}"' -f $e.Hora, $e.Accion, $e.Resultado, $e.Segundos) }
+            $sb.ToString() | Out-File -FilePath $sd.FileName -Encoding UTF8
+            [System.Windows.Forms.MessageBox]::Show("CSV guardado.","OK","OK","Information") | Out-Null
+        }
+    }.GetNewClosure())
+    $btnO.Add_Click({ Start-Process "explorer.exe" -ArgumentList $script:LogFolder })
+    $btnX.Add_Click({ $frm.Close() }.GetNewClosure())
+    [void]$frm.ShowDialog()
+}
+
+# ==================================================================
+# 43. ESTADO DEL PANEL
+# ==================================================================
+$script:PanelForm          = $null
+$script:PanelHeader        = $null
+$script:PanelLblValor      = $null
+$script:PanelLblDet1       = $null
+$script:PanelLblDet2       = $null
+$script:PanelLblDet3       = $null
+$script:PanelLblReloj      = $null
+$script:PanelLblTimer      = $null
+$script:PanelBtnActivar    = $null
+$script:PanelBtnDesactivar = $null
+$script:PanelStatusBar     = $null
+$script:PanelTimer         = $null
+$script:IsBusy             = $false
+$script:ActionStartTime    = $null
+$script:LastActionTime     = 0
+$script:LastActionName     = ""
+$script:LastKnownEstado    = "UNKNOWN"
+$script:IsKioskMode        = $false
+
+function Update-TrayIcon {
+    param([string]$Estado)
+    if ($null -eq $script:notifyIcon) { return }
+    try {
+        switch ($Estado) {
+            "ACTIVO"      { $script:notifyIcon.Icon = $script:IconOk;      $script:notifyIcon.Text = "Windows Defender - ACTIVADO" }
+            "DESACTIVADO" { $script:notifyIcon.Icon = $script:IconBad;     $script:notifyIcon.Text = "Windows Defender - DESACTIVADO" }
+            "PARCIAL"     { $script:notifyIcon.Icon = $script:IconPartial; $script:notifyIcon.Text = "Windows Defender - PARCIAL" }
+            default       { $script:notifyIcon.Icon = $script:IconPartial; $script:notifyIcon.Text = "Windows Defender" }
+        }
+    } catch { }
+}
+
+function Update-PanelStatusUI {
+    if ($null -eq $script:PanelForm -or $script:PanelForm.IsDisposed) { return }
+    $s = Get-QuickStatus
+    $diag = "Servicio:$($s.ServiceRunning) | RTP:$($s.RealTimeProtectionEnabled) | Politica:$($s.HasPolicy)"
+    if ($s.Estado -eq "ACTIVO") {
+        $script:PanelHeader.BackColor = $script:Colors.HeaderOk
+        $script:PanelLblValor.Text = "ACTIVADO"; $script:PanelLblValor.ForeColor = $script:Colors.Ok
+        $script:PanelLblDet1.Text = "El antivirus esta protegiendo este equipo."
+        $script:PanelLblDet2.Text = $diag
+        Set-NeonButtonState -Boton $script:PanelBtnActivar -Habilitado $false
+        Set-NeonButtonState -Boton $script:PanelBtnDesactivar -Habilitado $true
+    } elseif ($s.Estado -eq "PARCIAL") {
+        $script:PanelHeader.BackColor = $script:Colors.HeaderPart
+        $script:PanelLblValor.Text = "PROTECCION PARCIAL"; $script:PanelLblValor.ForeColor = $script:Colors.Warn
+        $script:PanelLblDet1.Text = "Falta proteccion real (RTP o politica)."
+        $script:PanelLblDet2.Text = $diag
+        Set-NeonButtonState -Boton $script:PanelBtnActivar -Habilitado $true
+        Set-NeonButtonState -Boton $script:PanelBtnDesactivar -Habilitado $true
+    } else {
+        $script:PanelHeader.BackColor = $script:Colors.HeaderWarn
+        $script:PanelLblValor.Text = "DESACTIVADO"; $script:PanelLblValor.ForeColor = $script:Colors.Bad
+        $script:PanelLblDet1.Text = "El antivirus esta inactivo."
+        $script:PanelLblDet2.Text = $diag
+        Set-NeonButtonState -Boton $script:PanelBtnActivar -Habilitado $true
+        Set-NeonButtonState -Boton $script:PanelBtnDesactivar -Habilitado $false
+    }
+    if ($script:LastActionTime -gt 0) { $script:PanelLblDet3.Text = "Ultima: $($script:LastActionName) en {0:N2}s" -f $script:LastActionTime }
+    else { $script:PanelLblDet3.Text = "F1 Ayuda | F5 Refrescar | Esc Cerrar" }
+    if ($s.Estado -ne $script:LastKnownEstado) {
+        Update-TrayIcon -Estado $s.Estado
+        if ($script:LastKnownEstado -ne "UNKNOWN") { Show-Toast "Windows Defender" "Estado: $($s.Estado)" "Info" }
+        $script:LastKnownEstado = $s.Estado
+    }
+}
+
+function Start-PanelTimer {
+    if ($null -ne $script:PanelTimer) { try { $script:PanelTimer.Stop(); $script:PanelTimer.Dispose() } catch { }; $script:PanelTimer = $null }
+    $script:PanelTimer = New-Object System.Windows.Forms.Timer
+    $script:PanelTimer.Interval = 5000
+    $script:PanelTimer.Add_Tick({
+        if ($null -eq $script:PanelForm -or $script:PanelForm.IsDisposed) { return }
+        $script:PanelLblReloj.Text = (Get-Date).ToString("HH:mm:ss")
+        if ($null -ne $script:ActionStartTime) {
+            $el = ((Get-Date) - $script:ActionStartTime).TotalSeconds
+            $script:PanelLblTimer.Text = "{0:N2}s" -f $el
+        } else { $script:PanelLblTimer.Text = "listo" }
+        if (-not $script:IsBusy -and $null -eq $script:ActionStartTime) {
+            try { Update-PanelStatusUI } catch { }
+        }
+    })
+    $script:PanelTimer.Start()
+}
+
+# ==================================================================
+# 44. PANEL PRINCIPAL
+# ==================================================================
+function Show-DefenderPanel {
+    if ($script:IsKioskMode -and -not (Test-KioskPassword)) { return }
+    if ($null -ne $script:PanelForm -and -not $script:PanelForm.IsDisposed) {
+        try {
+            if ($script:PanelForm.WindowState -eq [System.Windows.Forms.FormWindowState]::Minimized) {
+                $script:PanelForm.WindowState = [System.Windows.Forms.FormWindowState]::Normal
+            }
+            $script:PanelForm.Show(); $script:PanelForm.BringToFront()
+            $script:PanelForm.Activate(); $script:PanelForm.Focus()
+        } catch { }
+        return
+    }
+    Refresh-Palette
+    $script:IsBusy = $false; $script:ActionStartTime = $null
+    $script:LastActionTime = 0; $script:LastActionName = ""
+
+    $form = New-Object System.Windows.Forms.Form
+    $form.Text = "Control de Seguridad de Windows v4.0"
+    $form.ClientSize = New-Object System.Drawing.Size(460, 700)
+    $form.StartPosition = "CenterScreen"
+    $form.FormBorderStyle = "FixedSingle"
+    $form.MaximizeBox = $false; $form.MinimizeBox = $false
+    $form.KeyPreview = $true
+    $form.BackColor = $script:Colors.Bg
+    $form.Font = New-Object System.Drawing.Font("Segoe UI", 9)
+    $form.Icon = $script:IconOk
+
+    # Header
+    $header = New-Object System.Windows.Forms.Panel
+    $header.Dock = "Top"; $header.Height = 70; $header.BackColor = $script:Colors.HeaderUnk
+    $form.Controls.Add($header)
+    $lblHeader = New-Object System.Windows.Forms.Label
+    $lblHeader.Text = "DEFENDER CONTROL"; $lblHeader.Font = New-Object System.Drawing.Font("Consolas", 15, [System.Drawing.FontStyle]::Bold)
+    $lblHeader.ForeColor = [System.Drawing.Color]::White; $lblHeader.BackColor = [System.Drawing.Color]::Transparent
+    $lblHeader.AutoSize = $true; $lblHeader.Location = New-Object System.Drawing.Point(15, 12)
+    $header.Controls.Add($lblHeader)
+    $lblSubH = New-Object System.Windows.Forms.Label
+    $lblSubH.Text = "v4.0 Futuristic Edition"
+    $lblSubH.Font = New-Object System.Drawing.Font("Segoe UI", 8, [System.Drawing.FontStyle]::Italic)
+    $lblSubH.ForeColor = [System.Drawing.Color]::FromArgb(200, 220, 240); $lblSubH.BackColor = [System.Drawing.Color]::Transparent
+    $lblSubH.AutoSize = $true; $lblSubH.Location = New-Object System.Drawing.Point(17, 44)
+    $header.Controls.Add($lblSubH)
+    $lblReloj = New-Object System.Windows.Forms.Label
+    $lblReloj.Font = New-Object System.Drawing.Font("Consolas", 9)
+    $lblReloj.ForeColor = [System.Drawing.Color]::FromArgb(200, 220, 240); $lblReloj.BackColor = [System.Drawing.Color]::Transparent
+    $lblReloj.AutoSize = $false; $lblReloj.Size = New-Object System.Drawing.Size(160, 20)
+    $lblReloj.Location = New-Object System.Drawing.Point(285, 12); $lblReloj.TextAlign = "MiddleRight"
+    $header.Controls.Add($lblReloj)
+    $lblTimer = New-Object System.Windows.Forms.Label
+    $lblTimer.Font = New-Object System.Drawing.Font("Consolas", 9, [System.Drawing.FontStyle]::Bold)
+    $lblTimer.ForeColor = $script:Colors.AccentCyan; $lblTimer.BackColor = [System.Drawing.Color]::Transparent
+    $lblTimer.AutoSize = $false; $lblTimer.Size = New-Object System.Drawing.Size(160, 20)
+    $lblTimer.Location = New-Object System.Drawing.Point(285, 32); $lblTimer.TextAlign = "MiddleRight"
+    $lblTimer.Text = "listo"
+    $header.Controls.Add($lblTimer)
+
+    # Barra de estado (StatusStrip)
+    $statusStrip = New-Object System.Windows.Forms.StatusStrip
+    $statusStrip.SizingGrip = $false
+    $statusStrip.BackColor = $script:Colors.BgSecondary
+    $statusStrip.Font = New-Object System.Drawing.Font("Consolas", 8)
+    $statusLabel = New-Object System.Windows.Forms.ToolStripStatusLabel
+    $statusLabel.Text = "Listo."
+    $statusLabel.Spring = $true
+    $statusLabel.TextAlign = "MiddleLeft"
+    $statusLabel.ForeColor = $script:Colors.TextDiag
+    [void]$statusStrip.Items.Add($statusLabel)
+    $statusRight = New-Object System.Windows.Forms.ToolStripStatusLabel
+    $statusRight.Text = "F1 | F5 | Esc"
+    $statusRight.ForeColor = $script:Colors.TextMuted
+    [void]$statusStrip.Items.Add($statusRight)
+    $form.Controls.Add($statusStrip)
+    $script:PanelStatusBar = $statusLabel
+
+    # Card estado
+    $card = New-Object System.Windows.Forms.Panel
+    $card.Location = New-Object System.Drawing.Point(15, 85)
+    $card.Size = New-Object System.Drawing.Size(430, 140)
+    $card.BackColor = $script:Colors.CardBg
+    $card.BorderStyle = "FixedSingle"
+    $form.Controls.Add($card)
+    $lblTag = New-Object System.Windows.Forms.Label
+    $lblTag.Text = "ESTADO ACTUAL"; $lblTag.Font = New-Object System.Drawing.Font("Consolas", 8, [System.Drawing.FontStyle]::Bold)
+    $lblTag.ForeColor = $script:Colors.TextMuted; $lblTag.BackColor = [System.Drawing.Color]::Transparent
+    $lblTag.AutoSize = $true; $lblTag.Location = New-Object System.Drawing.Point(12, 6)
+    $card.Controls.Add($lblTag)
+    $lblValor = New-Object System.Windows.Forms.Label
+    $lblValor.Font = New-Object System.Drawing.Font("Consolas", 16, [System.Drawing.FontStyle]::Bold)
+    $lblValor.AutoSize = $true; $lblValor.Location = New-Object System.Drawing.Point(12, 26)
+    $lblValor.BackColor = [System.Drawing.Color]::Transparent
+    $card.Controls.Add($lblValor)
+    $lblDet1 = New-Object System.Windows.Forms.Label
+    $lblDet1.Font = New-Object System.Drawing.Font("Segoe UI", 8)
+    $lblDet1.ForeColor = $script:Colors.TextDiag; $lblDet1.BackColor = [System.Drawing.Color]::Transparent
+    $lblDet1.AutoSize = $false; $lblDet1.Size = New-Object System.Drawing.Size(410, 16)
+    $lblDet1.Location = New-Object System.Drawing.Point(12, 68)
+    $card.Controls.Add($lblDet1)
+    $lblDet2 = New-Object System.Windows.Forms.Label
+    $lblDet2.Font = New-Object System.Drawing.Font("Consolas", 8)
+    $lblDet2.ForeColor = $script:Colors.TextMuted; $lblDet2.BackColor = [System.Drawing.Color]::Transparent
+    $lblDet2.AutoSize = $false; $lblDet2.Size = New-Object System.Drawing.Size(410, 16)
+    $lblDet2.Location = New-Object System.Drawing.Point(12, 88)
+    $card.Controls.Add($lblDet2)
+    $lblDet3 = New-Object System.Windows.Forms.Label
+    $lblDet3.Font = New-Object System.Drawing.Font("Segoe UI", 8, [System.Drawing.FontStyle]::Italic)
+    $lblDet3.ForeColor = $script:Colors.AccentCyan; $lblDet3.BackColor = [System.Drawing.Color]::Transparent
+    $lblDet3.AutoSize = $false; $lblDet3.Size = New-Object System.Drawing.Size(410, 16)
+    $lblDet3.Location = New-Object System.Drawing.Point(12, 112)
+    $card.Controls.Add($lblDet3)
+
+    # Botones (3 columnas x 7 filas)
+    $btnVerificar  = New-NeonButton "VERIFICAR" $script:Colors.AccentPurple $script:Colors.AccentPurpH  15 240 205 32
+    $btnVerificar.Size = New-Object System.Drawing.Size(430, 32)
+    $btnActivar    = New-NeonButton "ACTIVAR PROTECCION" $script:Colors.AccentGreen $script:Colors.AccentGreenH 15 280 210 32
+    $btnDesactivar = New-NeonButton "DESACTIVAR PROTECCION" $script:Colors.AccentRed $script:Colors.AccentRedH 235 280 210 32
+    $btnHistorial  = New-NeonButton "Historial" $script:Colors.AccentBlue $script:Colors.AccentBlueH 15 320 102 32
+    $btnPerfiles   = New-NeonButton "Perfiles" $script:Colors.AccentGreen $script:Colors.AccentGreenH 122 320 102 32
+    $btnProg       = New-NeonButton "Programador" $script:Colors.AccentPurple $script:Colors.AccentPurpH 229 320 102 32
+    $btnBackup     = New-NeonButton "Backup" $script:Colors.AccentCyan $script:Colors.AccentCyanH 336 320 109 32
+    $btnFirmas     = New-NeonButton "Firmas" $script:Colors.AccentCyan $script:Colors.AccentCyanH 15 360 102 32
+    $btnEventos    = New-NeonButton "Eventos" $script:Colors.AccentRed $script:Colors.AccentRedH 122 360 102 32
+    $btnChart      = New-NeonButton "Estadisticas" $script:Colors.AccentAmber $script:Colors.AccentAmberH 229 360 102 32
+    $btnDiag       = New-NeonButton "Diagnostico" $script:Colors.AccentAmber $script:Colors.AccentAmberH 336 360 109 32
+    $btnAyuda      = New-NeonButton "Ayuda (F1)" $script:Colors.AccentBlue $script:Colors.AccentBlueH 15 400 102 32
+    $btnConfig     = New-NeonButton "Config" $script:Colors.AccentBlue $script:Colors.AccentBlueH 122 400 102 32
+    $btnLog        = New-NeonButton "Ver Log" $script:Colors.AccentCyan $script:Colors.AccentCyanH 229 400 102 32
+    $btnAcerca     = New-NeonButton "Acerca" $script:Colors.Neutral $script:Colors.TextMuted 336 400 109 32
+    $btnSalir      = New-NeonButton "SALIR" $script:Colors.AccentRed $script:Colors.AccentRedH 15 440 430 36
+
+    foreach ($b in @($btnVerificar,$btnActivar,$btnDesactivar,$btnHistorial,$btnPerfiles,$btnProg,$btnBackup,
+                     $btnFirmas,$btnEventos,$btnChart,$btnDiag,$btnAyuda,$btnConfig,$btnLog,$btnAcerca,$btnSalir)) {
+        $form.Controls.Add($b)
+    }
+
+    # Tooltips
+    Set-Help $btnVerificar "Verifica 18 modulos de Defender"
+    Set-Help $btnActivar   "Restaura Defender con opciones avanzadas"
+    Set-Help $btnDesactivar "Desactiva Defender (agresivo)"
+    Set-Help $btnHistorial "Historial de operaciones"
+    Set-Help $btnPerfiles  "Perfiles: Gaming / Desarrollo / Maxima"
+    Set-Help $btnProg      "Programar tareas automaticas"
+    Set-Help $btnBackup    "Backup / Restore de configuracion"
+    Set-Help $btnFirmas    "Actualizar firmas con progreso"
+    Set-Help $btnEventos   "Visor de eventos del sistema"
+    Set-Help $btnChart     "Grafico de estadisticas"
+    Set-Help $btnDiag      "Autodiagnostico del sistema"
+    Set-Help $btnAyuda     "Abrir ayuda completa (F1)"
+    Set-Help $btnConfig    "Configuracion: tema, kiosco, idioma"
+    Set-Help $btnLog       "Ver log completo"
+    Set-Help $btnAcerca    "Informacion de la app"
+    Set-Help $btnSalir     "Cerrar panel (app sigue activa)"
+
+    $script:PanelForm          = $form
+    $script:PanelHeader        = $header
+    $script:PanelLblValor      = $lblValor
+    $script:PanelLblDet1       = $lblDet1
+    $script:PanelLblDet2       = $lblDet2
+    $script:PanelLblDet3       = $lblDet3
+    $script:PanelLblReloj      = $lblReloj
+    $script:PanelLblTimer      = $lblTimer
+    $script:PanelBtnActivar    = $btnActivar
+    $script:PanelBtnDesactivar = $btnDesactivar
+
+    # Atajos
+    $form.Add_KeyDown({
+        param($sender, $e)
+        if ($e.KeyCode -eq [System.Windows.Forms.Keys]::F1) { Show-HelpDialog; $e.Handled = $true }
+        elseif ($e.KeyCode -eq [System.Windows.Forms.Keys]::F5) { Update-PanelStatusUI; $e.Handled = $true }
+        elseif ($e.Control -and $e.KeyCode -eq [System.Windows.Forms.Keys]::R) { Update-PanelStatusUI; $e.Handled = $true }
+        elseif ($e.KeyCode -eq [System.Windows.Forms.Keys]::Escape) {
+            if ($null -ne $script:PanelTimer) { try { $script:PanelTimer.Stop(); $script:PanelTimer.Dispose() } catch { }; $script:PanelTimer = $null }
+            $script:PanelForm.Close()
+        }
+    })
+
+    $btnVerificar.Add_Click({ Show-CompleteStatusDialog })
+    $btnHistorial.Add_Click({ Show-HistoryDialog })
+    $btnPerfiles.Add_Click({ Show-ProfilesDialog })
+    $btnProg.Add_Click({ Show-SchedulerDialog })
+    $btnBackup.Add_Click({ Show-BackupDialog })
+    $btnFirmas.Add_Click({ Show-SignaturesDialog })
+    $btnEventos.Add_Click({ Show-EventsDialog })
+    $btnChart.Add_Click({ Show-ChartDialog })
+    $btnDiag.Add_Click({ Show-DiagnosticsDialog })
+    $btnAyuda.Add_Click({ Show-HelpDialog })
+    $btnConfig.Add_Click({ Show-SettingsDialog })
+    $btnLog.Add_Click({ Show-LogViewer })
+
+    $btnActivar.Add_Click({
+        if (-not (Test-Admin)) { [System.Windows.Forms.MessageBox]::Show("Ejecuta como Administrador.","Permisos","OK","Warning") | Out-Null; return }
+        $opts = Show-AdvancedActivationDialog
+        if (-not $opts.Apply) { return }
+        try {
+            $script:IsBusy = $true; $script:ActionStartTime = Get-Date; $script:LastActionName = "Activar"
+            $lblDet1.Text = "Activando..."
+            [System.Windows.Forms.Application]::DoEvents()
+            $log = Enable-Defender -EnableCloud $opts.EnableCloud -EnableSamples $opts.EnableSamples -EnableTamper $opts.EnableTamper
+            $elapsed = ((Get-Date) - $script:ActionStartTime).TotalSeconds
+            $script:LastActionTime = $elapsed
+            $script:ActionStartTime = $null; $script:IsBusy = $false
+            Update-PanelStatusUI
+            $s = Get-QuickStatus
+            Add-History -Accion "Activar" -Resultado $s.Estado -Segundos $elapsed
+            if (-not $script:SilentMode) {
+                [System.Windows.Forms.MessageBox]::Show("Activacion: $($s.Estado)`nTiempo: {0:N2}s`n`n$log" -f $elapsed, "Resultado", "OK", "Information") | Out-Null
+            }
+        } finally { $script:IsBusy = $false; $script:ActionStartTime = $null }
+    })
+
+    $btnDesactivar.Add_Click({
+        if (-not (Test-Admin)) { [System.Windows.Forms.MessageBox]::Show("Ejecuta como Administrador.","Permisos","OK","Warning") | Out-Null; return }
+        if (-not $script:SilentMode) {
+            $c = [System.Windows.Forms.MessageBox]::Show("Desactivar Windows Defender completamente?`n`nRequiere reinicio para aplicar al 100% en Windows 11.","Confirmar","YesNo","Warning")
+            if ($c -ne "Yes") { return }
+        }
+        try {
+            $script:IsBusy = $true; $script:ActionStartTime = Get-Date; $script:LastActionName = "Desactivar"
+            $lblDet1.Text = "Desactivando..."
+            [System.Windows.Forms.Application]::DoEvents()
+            $log = Disable-Defender
+            $elapsed = ((Get-Date) - $script:ActionStartTime).TotalSeconds
+            $script:LastActionTime = $elapsed
+            $script:ActionStartTime = $null; $script:IsBusy = $false
+            Update-PanelStatusUI
+            $s = Get-QuickStatus
+            Add-History -Accion "Desactivar" -Resultado $s.Estado -Segundos $elapsed
+            if (-not $script:SilentMode) {
+                $extra = if ($s.Estado -ne "DESACTIVADO") { "`nIMPORTANTE: REINICIA el equipo para aplicar al 100%." } else { "" }
+                [System.Windows.Forms.MessageBox]::Show("Desactivacion: $($s.Estado)`nTiempo: {0:N2}s$extra`n`n$log" -f $elapsed, "Resultado", "OK", "Information") | Out-Null
+            }
+        } finally { $script:IsBusy = $false; $script:ActionStartTime = $null }
+    })
+
+    $btnAcerca.Add_Click({
+        $osInfo = Get-OSInfo
+        $txt = @"
+DEFENDER CONTROL - v4.0 FUTURISTIC EDITION
+============================================
+
+Autor:  Ing. Yosvany Hernandez Quintero
+Movil:  +53 5 2160801
+Movil:  +53 5 9860911
+
+--------------------------------------------
+Sistema Operativo: $($osInfo.Caption)
+Version: $($osInfo.Version)
+Build: $($osInfo.BuildNumber)
+PowerShell: $($PSVersionTable.PSVersion)
+Integridad SHA256: $($script:ScriptHash)
+--------------------------------------------
+
+CARPETA DE DATOS:
+$($script:ConfigDir)
+
+CARPETA DE LOGS:
+$($script:LogFolder)
+
+CARPETA DE BACKUPS:
+$($script:BackupDir)
+--------------------------------------------
+
+(c) 2026 - Todos los derechos reservados
+"@
+        [System.Windows.Forms.MessageBox]::Show($txt,"Acerca de","OK","Information") | Out-Null
+    })
+
+    $btnSalir.Add_Click({
+        if ($null -ne $script:PanelTimer) { try { $script:PanelTimer.Stop(); $script:PanelTimer.Dispose() } catch { }; $script:PanelTimer = $null }
+        $script:PanelForm.Close()
+    })
+
+    $form.Add_FormClosed({
+        if ($null -ne $script:PanelTimer) { try { $script:PanelTimer.Stop(); $script:PanelTimer.Dispose() } catch { }; $script:PanelTimer = $null }
+        $script:PanelForm = $null
+    })
+
+    $form.Add_Shown({ Update-PanelStatusUI; Start-PanelTimer })
+    $form.Show()
+}
+
+# ==================================================================
+# 45. ARRANQUE
+# ==================================================================
+Write-AppLog "====================================================" "INFO"
+Write-AppLog "Aplicacion iniciada - DefenderTray v4.0" "INFO"
+Write-AppLog "Autor: Ing. Yosvany Hernandez Quintero" "INFO"
+Write-AppLog "SilentMode: $($script:SilentMode) | Portable: $($script:PortableMode)" "INFO"
+Write-AppLog "====================================================" "INFO"
+
+Test-ScriptIntegrity | Out-Null
+Load-History
+
+if (Test-Admin) { Write-AppLog "Admin: SI" "INFO" } else { Write-AppLog "Admin: NO" "WARN" }
+if (Test-Admin) { Add-DefenderExclusion | Out-Null }
+
+# Argumento -action para el programador
+if ($args -contains "-action") {
+    $idx = [array]::IndexOf($args, "-action")
+    if ($idx -ge 0 -and $idx + 1 -lt $args.Count) {
+        $actionArg = $args[$idx + 1]
+        if ($actionArg -eq "disable") { $null = Disable-Defender; Write-AppLog "Accion programada: disable" "INFO" }
+        elseif ($actionArg -eq "enable") { $null = Enable-Defender; Write-AppLog "Accion programada: enable" "INFO" }
+        exit 0
+    }
+}
+
+$initQuick = Get-QuickStatus
+$script:LastKnownEstado = $initQuick.Estado
+if ($initQuick.Estado -eq "ACTIVO") { $estadoInicial = "ACTIVADO"; $detalleInicial = "El antivirus esta protegiendo el equipo." }
+elseif ($initQuick.Estado -eq "PARCIAL") { $estadoInicial = "PROTECCION PARCIAL"; $detalleInicial = "Falta proteccion real." }
+else { $estadoInicial = "DESACTIVADO"; $detalleInicial = "El antivirus esta inactivo." }
+
+if (-not $script:SilentMode -and -not $script:AppConfig.FirstRunDone) {
+    Show-FirstRunWizard
+}
+
+# ==================================================================
+# 46. BANDEJA + MENU
+# ==================================================================
+$script:notifyIcon = New-Object System.Windows.Forms.NotifyIcon
+$script:notifyIcon.Icon = $script:IconPartial
+$script:notifyIcon.Text = "Control de Seguridad de Windows"
+$script:notifyIcon.Visible = $true
+Update-TrayIcon -Estado $initQuick.Estado
+
+$menu = New-Object System.Windows.Forms.ContextMenuStrip
+$menu.BackColor = $script:Colors.BgSecondary
+$menu.ForeColor = $script:Colors.Text
+
+function Add-MenuItem {
+    param([string]$Texto, [scriptblock]$Accion)
+    $mi = New-Object System.Windows.Forms.ToolStripMenuItem
+    $mi.Text = $Texto
+    $mi.ForeColor = $script:Colors.Text
+    $mi.Add_Click($Accion)
+    return $mi
+}
+
+[void]$menu.Items.Add((Add-MenuItem "Abrir panel" { Show-DefenderPanel }))
+[void]$menu.Items.Add((Add-MenuItem "Verificar estado" { Show-CompleteStatusDialog }))
+[void]$menu.Items.Add((Add-MenuItem "Historial" { Show-HistoryDialog }))
+[void]$menu.Items.Add((Add-MenuItem "Perfiles" { Show-ProfilesDialog }))
+[void]$menu.Items.Add((Add-MenuItem "Programador" { Show-SchedulerDialog }))
+[void]$menu.Items.Add((Add-MenuItem "Backup/Restore" { Show-BackupDialog }))
+[void]$menu.Items.Add((Add-MenuItem "Actualizar firmas" { Show-SignaturesDialog }))
+[void]$menu.Items.Add((Add-MenuItem "Eventos" { Show-EventsDialog }))
+[void]$menu.Items.Add((Add-MenuItem "Estadisticas" { Show-ChartDialog }))
+[void]$menu.Items.Add((Add-MenuItem "Diagnostico" { Show-DiagnosticsDialog }))
+[void]$menu.Items.Add((Add-MenuItem "Ayuda (F1)" { Show-HelpDialog }))
+[void]$menu.Items.Add((Add-MenuItem "Configuracion" { Show-SettingsDialog }))
+[void]$menu.Items.Add((New-Object System.Windows.Forms.ToolStripSeparator))
+$miAct = Add-MenuItem "Activar Defender" {
+    if (-not (Test-Admin)) { return }
+    $opts = Show-AdvancedActivationDialog
+    if (-not $opts.Apply) { return }
+    $null = Enable-Defender -EnableCloud $opts.EnableCloud -EnableSamples $opts.EnableSamples -EnableTamper $opts.EnableTamper
+    $s = Get-QuickStatus; Add-History -Accion "Activar (menu)" -Resultado $s.Estado -Segundos 0
+    Update-TrayIcon -Estado $s.Estado
+}
+$miDes = Add-MenuItem "Desactivar Defender" {
+    if (-not (Test-Admin)) { return }
+    $null = Disable-Defender
+    $s = Get-QuickStatus; Add-History -Accion "Desactivar (menu)" -Resultado $s.Estado -Segundos 0
+    Update-TrayIcon -Estado $s.Estado
+}
+[void]$menu.Items.Add($miAct); [void]$menu.Items.Add($miDes)
+[void]$menu.Items.Add((New-Object System.Windows.Forms.ToolStripSeparator))
+$miLog2 = Add-MenuItem "Ver Log" { Show-LogViewer }
+[void]$menu.Items.Add($miLog2)
+[void]$menu.Items.Add((New-Object System.Windows.Forms.ToolStripSeparator))
+[void]$menu.Items.Add((Add-MenuItem "Salir" {
+    Write-AppLog "Cierre." "INFO"
+    if ($null -ne $script:PanelTimer) { try { $script:PanelTimer.Stop(); $script:PanelTimer.Dispose() } catch { } }
+    if ($null -ne $script:PanelForm -and -not $script:PanelForm.IsDisposed) { try { $script:PanelForm.Close() } catch { } }
+    $script:notifyIcon.Visible = $false; $script:notifyIcon.Dispose()
+    [System.Windows.Forms.Application]::Exit()
+}))
+
+$menu.Add_Opening({
+    $s = Get-QuickStatus
+    if ($s.Estado -eq "ACTIVO") { $miAct.Enabled = $false; $miDes.Enabled = $true }
+    else { $miAct.Enabled = $true; $miDes.Enabled = $false }
+})
+
+$script:notifyIcon.ContextMenuStrip = $menu
+$script:notifyIcon.Add_MouseClick({
+    param($sender, $e)
+    if ($e.Button -eq [System.Windows.Forms.MouseButtons]::Left) { Show-DefenderPanel }
+})
+
+if (-not $script:SilentMode) {
+    $script:notifyIcon.ShowBalloonTip(3000, "Control de Seguridad v4.0", "Estado: $estadoInicial", "Info")
+}
+
+[System.Windows.Forms.Application]::Run()
