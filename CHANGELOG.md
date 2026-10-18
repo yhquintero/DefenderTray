@@ -9,6 +9,17 @@ Historial de DefenderTray reconstruido **a partir de lo que declaran los propios
 >
 > El formato sigue [Keep a Changelog](https://keepachangelog.com/es/1.1.0/) (`Añadido`, `Cambiado`, `Corregido`, `Obsoleto`) y la numeración del proyecto es *ad-hoc*: la rama 4.x usó sufijos `+`, `Pro`, `_Final` en lugar de números.
 
+## [8.4.1 ULTIMATE] — 2026-10-18
+
+### Corregido
+- **ParserError en Reparar Firmas:** se delimita `${h}` al construir el mensaje con `:` para que PowerShell 5.1 no lo interprete como una variable de unidad.
+- **Actualización desde GitHub:** *Buscar Actualización* lee el script de `versiones/8/DefenderTray_8.4_Pro.ps1` desde `main` vía Contents API; ya no depende de que exista un GitHub Release. Verifica la huella Git del blob, la versión y el parser antes de mostrar/instalar; conserva un respaldo con fecha y también detecta cambios de contenido dentro de la misma versión.
+- **Recuperación de una copia que no parsea:** se añade [`Reparar-DefenderTray.ps1`](versiones/8/Reparar-DefenderTray.ps1), independiente de la aplicación. Descarga y valida el script desde GitHub, crea un `.bak` y reemplaza el archivo indicado; no ejecuta el contenido descargado.
+
+### Seguridad y alcance
+- Un `ParserError` impide ejecutar el autoactualizador integrado. Para la primera reparación se usa el recuperador independiente; una copia funcional puede autoactualizarse desde GitHub con confirmación.
+- El hash Git (SHA-1) comprueba la integridad del blob devuelto por la API y SHA-256 se usa para comparar el contenido normalizado local/remoto; no equivalen a una firma Authenticode independiente. Ejecuta solo desde un repositorio que confíes.
+
 ## [8.4.0 ULTIMATE] — 2026-10-18
 
 ### Mejoras v8.4.0
@@ -322,14 +333,14 @@ Detectados al redactar este historial; cada uno merece su propio pull request:
 4. Cuatro variantes de la 4.3 Pro (`+`, `++`, prefijo `+` y la base) con la misma cabecera: hay que decidir cuál es la buena y mover el resto a un histórico.
 5. `DefenderTray_4.3.3_Pro.ps1` se autodenomina **v4.4** en su cabecera: renombrar el archivo o corregir la cabecera.
 6. `WiFi_1126H2_2.1.ps1` fuera de lugar; y su propia cabecera recomienda «UTF-8 con BOM» mientras el archivo está guardado **sin BOM**.
-7. Sin `v` inicial ni tags: publicar `v8.1` como GitHub Release con el `.ps1` y su `SHA256SUMS` permitiría usar la autoactualización y fechar este archivo.
+7. La autoactualización 8.4.1 consulta `main` directamente; un tag/Release y `SHA256SUMS` siguen siendo útiles para distribuir un artefacto verificable y fechar este archivo.
 8. La cabecera de la v8.1 mantiene el contacto telefónico del autor en claro; si eso no es lo que quieres publicar, conviene moverlo a la documentación y dejar en el script solo el enlace al repositorio.
 
 ## 📦 Cómo mantener este archivo
 
 - **Una línea por cambio**, en la sección `Añadido`/`Corregido` de la versión en curso, con el imperativo en pasado («Añadido modo X», «Corregido el caso Y»).
 - Cambia **a la vez** el bloque `<# Novedades vX sobre vY #>` de la cabecera del script: es la fuente de este registro y de la Ayuda (`F1`).
-- Al publicar una versión: `git tag v8.2 && git push origin v8.2`, crea el release con el `.ps1` y un asset `SHA256SUMS`, y añade la fecha real a la entrada de arriba.
+- Al publicar una versión: crea un tag/Release con el `.ps1` y `SHA256SUMS`, y añade la fecha real a la entrada de arriba. La app actualiza desde la rama `main` sin depender del Release.
 - Antes de abrir el pull request: `python .github/check_markdown_links.py`, que es lo que corta la integración continua si dejas un enlace o una ancla rotos.
 - Los cambios de comportamiento sensibles (desactivación, API, cifrado, red, persistencia) merecen también una línea en [SECURITY.md](SECURITY.md), no solo aquí.
 

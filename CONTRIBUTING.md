@@ -25,7 +25,7 @@
 - Para cambios grandes (una sección nueva, otro proveedor de datos, otra forma de persistencia, tocar la secuencia de 10 pasos), abre antes un issue y acordemos el enfoque: aquí el coste de equivocarse es una máquina sin protección.
 - **Un pull request = un cambio.** «Arreglo del puerto + refactor de colores + i18n» se cierra y se pide separar.
 - Si añades, renombras o quitas un archivo de `versiones/`, actualiza la tabla de índice de [`versiones/README.md`](versiones/README.md) y el [CHANGELOG.md](CHANGELOG.md): ese par es lo primero que lee quien llega sin contexto.
-- Cambia **la versión actual** (`versiones/8/DefenderTray_8.1_Pro.ps1`), no las carpetas históricas: 1.x–7.x son archivo, no destino.
+- Cambia **la versión actual** (`versiones/8/DefenderTray_8.4_Pro.ps1`), no las carpetas históricas: 1.x–7.x son archivo, no destino.
 - No toques `versiones/4/DefenderTray_4.1.ps1.backup_*.bak`, `DefenderTray_4.3.1_Pro - copia - copia.ps1` ni `versiones/revisar`: son residuos catalogados en [CHANGELOG.md](CHANGELOG.md#-pendientes-de-limpieza-registrados). Si quieres proponer limpiarlos, hazlo en un pull request propio y sin tocar nada más.
 
 ## 🔨 Preparar el entorno
@@ -43,16 +43,16 @@ No hay compilación ni gestores de paquetes: es un archivo `.ps1` y se ejecuta t
 ```powershell
 git clone https://github.com/yhquintero/DefenderTray.git
 cd DefenderTray
-code .\versiones\8\DefenderTray_8.1_Pro.ps1
+code .\versiones\8\DefenderTray_8.4_Pro.ps1
 
 # Comprobación de sintaxis sin ejecutar nada: si $errs queda vacío, el archivo parsea
 $errs = $null; $toks = $null
 [void][System.Management.Automation.Language.Parser]::ParseFile(
-    (Resolve-Path .\versiones\8\DefenderTray_8.1_Pro.ps1), [ref]$toks, [ref]$errs)
+    (Resolve-Path .\versiones\8\DefenderTray_8.4_Pro.ps1), [ref]$toks, [ref]$errs)
 $errs | ForEach-Object { "{0}: {1}" -f $_.Extent.StartLineNumber, $_.Message }
 
 # Análisis estático (recomendado, no bloqueante)
-Invoke-ScriptAnalyzer -Path .\versiones\8\DefenderTray_8.1_Pro.ps1 -Severity Warning,Error
+Invoke-ScriptAnalyzer -Path .\versiones\8\DefenderTray_8.4_Pro.ps1 -Severity Warning,Error
 ```
 
 ## 🧪 Banco de pruebas: cómo probar sin quedarte desprotegido
@@ -61,7 +61,7 @@ Sigue este orden en la máquina virtual y toma la instantánea **antes** del pas
 
 1. **Instantánea limpia** de la VM (con Defender en estado sano).
 2. **Exporta el registro** que la herramienta puede borrar (los comandos están en [SECURITY.md](SECURITY.md#-los-límites-detallados), L-3) y guarda la salida en el escritorio de la VM.
-3. **Modo auditoría**: `powershell -NoProfile -ExecutionPolicy Bypass -File .\DefenderTray_8.1_Pro.ps1 -audit`. Revisa `%LOCALAPPDATA%\DefenderTray\Logs\` y `Auditoria\`: no debe haber **ninguna** escritura aplicada.
+3. **Modo auditoría**: `powershell -NoProfile -ExecutionPolicy Bypass -File .\DefenderTray_8.4_Pro.ps1 -audit`. Revisa `%LOCALAPPDATA%\DefenderTray\Logs\` y `Auditoria\`: no debe haber **ninguna** escritura aplicada.
 4. **Desactivación controlada**: `-silent -action disable`, comprueba `Get-MpComputerStatus`, **reinicia** y vuelve a comprobar (así se ve si el estado queda o Windows lo revive).
 5. **Reactivación**: abre el panel y pulsa *Activar*, o `-silent -action enable`. Verifica que Tamper Protection, `WinDefend` en ejecución y `RealTimeProtectionEnabled` quedan en `True`.
 6. **Reparación profunda**: ejecuta *1. Borrar políticas* y *2. Servicios* en un equipo estropeado a propósito (p. ej. `sc config WinDefend start= disabled`) y confirma que lo devuelve a un estado saneable.
@@ -214,7 +214,7 @@ Todo lo que toque una de estas áreas se revisa línea a línea y puede pedirse 
 | `Show-DeepRepairDialog`, `reg delete`, `sc config`, `FailureActions` | Borra claves y cambia el arranque de servicios críticos del SO. |
 | `Initialize-RESTApi` y sus rutas | Autenticación, enlazado de puerto, métodos que mutan estado e interpolación de entradas. |
 | `Protect-String`, huella del kiosco, clave de SQLite | Cualquier abaratamiento del cifrado o del hash se documenta como límite en SECURITY.md. |
-| `Invoke-AutoUpdate`, `Get-LatestGitHubRelease`, `Initialize-Sqlite` | Descarga y ejecuta código: exige verificación de hash o firma. |
+| `Invoke-AutoUpdate`, `Get-GitHubScriptUpdate`, `Initialize-Sqlite` | Descarga y reemplaza código: exige comprobar integridad, sintaxis, versión, respaldo y procedencia; SHA/blob no sustituye a una firma de editor. |
 | `Register-TrayTask`, `Install-AsService`, `Add-MpPreference` | Persistencia con privilegios máximos y carpetas fuera del escaneo. |
 | Notificaciones (Telegram/FCM/SMTP/webhooks) y `Backup-ToCloud` | Sacan datos del equipo: hay que decir cuáles, dónde y cómo se apagan. |
 
@@ -240,7 +240,7 @@ Thank you for your interest in improving DefenderTray! This guide covers how to 
 
 ### ✅ Before you start
 
-Search issues and pull requests first. Agree on a plan in an issue for anything large (a new section, another data provider, another persistence mechanism, changes to the 10-step sequences). One change per pull request. Patch the **current** version (`versiones/8/DefenderTray_8.1_Pro.ps1`); folders 1.x–7.x are an archive. Leave `*.bak`, `*- copia*` and `versiones/revisar` alone.
+Search issues and pull requests first. Agree on a plan in an issue for anything large (a new section, another data provider, another persistence mechanism, changes to the 10-step sequences). One change per pull request. Patch the **current** version (`versiones/8/DefenderTray_8.4_Pro.ps1`); folders 1.x–7.x are an archive. Leave `*.bak`, `*- copia*` and `versiones/revisar` alone.
 
 ### 🔨 Development setup
 
@@ -248,7 +248,7 @@ No build step and no package manager — one `.ps1`. You need: a **Windows 10/11
 
 ```powershell
 $errs = $null; $toks = $null
-[void][System.Management.Automation.Language.Parser]::ParseFile((Resolve-Path .\versiones\8\DefenderTray_8.1_Pro.ps1), [ref]$toks, [ref]$errs)
+[void][System.Management.Automation.Language.Parser]::ParseFile((Resolve-Path .\versiones\8\DefenderTray_8.4_Pro.ps1), [ref]$toks, [ref]$errs)
 $errs | ForEach-Object { "{0}: {1}" -f $_.Extent.StartLineNumber, $_.Message }
 ```
 

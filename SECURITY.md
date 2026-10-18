@@ -7,18 +7,18 @@ DefenderTray es una herramienta **dual**: existe para quitar la protección anti
 Gracias por ayudarnos a mantenerla segura. Si ves algo que aquí no esté, dinóslo por el canal privado.
 
 > [!IMPORTANT]
-> **Auditoría de la que parte este documento:** revisión del código de [`versiones/8/DefenderTray_8.1_Pro.ps1`](versiones/8/DefenderTray_8.1_Pro.ps1) (4 747 líneas, 65 secciones). v8.1 es idéntico funcionalmente a v8.0; todo lo que sigue aplica a ambas. Los límites están **abiertos y sin corregir** a la fecha de este documento: trátalos como condiciones de uso, no como parches en camino.
+> **Base de auditoría:** la revisión original fue sobre [`versiones/8/DefenderTray_8.1_Pro.ps1`](versiones/8/DefenderTray_8.1_Pro.ps1), no una auditoría completa de las versiones posteriores. La versión mantenida es 8.4.1; conserva varios riesgos listados aquí y añade actualización desde GitHub `main`. La sección L-5 describe el mecanismo actual. No interpretes el número de versión como certificación de seguridad.
 
 ## 📦 Versiones con soporte
 
 | Versión | Soporte |
 |---|---|
-| **8.1 ULTIMATE** (rama `main`) | ✅ Recibe correcciones de seguridad y de funcionamiento. |
-| 8.0 ULTIMATE | 🟡 Solo mientras no exista 8.2: recibe el parche, sin versión propia. |
+| **8.4.1 ULTIMATE** (rama `main`) | ✅ Versión mantenida; recibe correcciones de seguridad y funcionamiento. |
+| 8.3, 8.2, 8.1 y 8.0 ULTIMATE | ❌ Versiones anteriores: actualiza desde GitHub o reemplaza manualmente. |
 | 7.0 y 6.0 ULTIMATE | ❌ Sin soporte. Contienen la API REST sin las protecciones posteriores y menos verificaciones: actualiza. |
 | 5.0 Pro y anteriores (4.x, 3.x, 1–2) | ❌ Sin soporte. Diseñadas antes del modo auditoría, del cifrado de configuración y del respaldo del registro. |
 
-Para reportes, indica siempre **versión exacta y SHA256** del `.ps1` que usas (`Get-FileHash .\DefenderTray_8.1_Pro.ps1`), porque entre la 4.x y la 8.x cambiaron por completo las rutas de datos, la API local y el manejo de credenciales.
+Para reportes, indica siempre **versión exacta y SHA256** del `.ps1` que usas (`Get-FileHash .\DefenderTray_8.4_Pro.ps1`), porque entre la 4.x y la 8.x cambiaron por completo las rutas de datos, la API local y el manejo de credenciales.
 
 ## 📣 Cómo reportar una vulnerabilidad
 
@@ -52,7 +52,7 @@ Para reportes, indica siempre **versión exacta y SHA256** del `.ps1` que usas (
 - El script en sí: secuencias de `Disable-Defender` y `Enable-Defender`, reparación profunda y de firmas, respaldo/restauración del registro, modo auditoría y modo forense.
 - La **API local**: HTTP/HTTPS, REST, GraphQL, SSE, Fleet y PWA (autenticación, métodos, enlazado de puerto, CORS, inyección de argumentos).
 - Manejo de secretos: `config.dat` (DPAPI), huella del kiosco, contraseña de desinstalación, clave de la base SQLite, tokens de Telegram/FCM, credenciales SMTP y URL de webhooks.
-- Distribución y actualización: descarga automática del proveedor SQLite, autoactualización desde GitHub Releases, verificación SHA256, firma Authenticode, MSI de WiX y `Dockerfile`/`docker-compose`.
+- Distribución y actualización: descarga automática del proveedor SQLite, autoactualización desde GitHub Contents API (`main`), validación del SHA de blob y del parser, firma Authenticode, MSI de WiX y `Dockerfile`/`docker-compose`.
 - Persistencia: tareas programadas (`DefenderTray_*`, `DefenderTray_Service`), exclusión de Defender añadida al directorio del script y reglas de firewall.
 - Interfaz: diálogos, atajos, validación de entradas, control de biométricos (`UserConsentVerifier`).
 
@@ -62,7 +62,7 @@ Para reportes, indica siempre **versión exacta y SHA256** del `.ps1` que usas (
 - El estado de una máquina **ya comprometida**: si un atacante ya es `SYSTEM`, cualquier control de esta herramienta es irrelevante (ver [límites](#-límites-conocidos-y-mitigaciones)).
 - Ataques que requieren acceso físico sin BitLocker, ingeniería social, denegación de servicio volumétrica y el uso deliberado de la herramienta contra equipos ajenos.
 - Vulnerabilidades de proveedores con los que te integras (NuGet, `api.telegram.org`, Google/Firebase, tu relay SMTP, tu receptor de webhooks) sin impacto demostrable sobre DefenderTray.
-- Versiones antiguas del script y copias modificadas o renombradas por terceros: reproduce primero contra la v8.1 publicada.
+- Versiones antiguas del script y copias modificadas o renombradas por terceros: reproduce primero contra la versión mantenida 8.4.1.
 - Detecciones de antivirus sobre el script: no son un fallo nuestro sino una consecuencia esperada del propósito. Aporta contexto y trabajamos la documentación; no «ofuscamos para pasar».
 
 ## 🧨 Modelo de amenazas: qué protege y qué no
@@ -78,30 +78,30 @@ Para reportes, indica siempre **versión exacta y SHA256** del `.ps1` que usas (
 
 ## 🔐 Cómo protege DefenderTray tus datos
 
-- **Sin servidores propios.** No hay analíticas, publicidad, actualización forzada ni telemetría. La única petición que puede ocurrir sin configurar nada es la descarga opcional del proveedor SQLite (ver [L-6](#-los-límites-detallados)).
+- **Sin servidores propios ni telemetría.** La versión 8.4.1 consulta por defecto `api.github.com` para comprobar el archivo público en `main`; esa petición no incluye nombre del equipo ni configuración. Solo instala el `.ps1` tras confirmación. También puede descargarse el proveedor SQLite desde NuGet (ver [L-6](#-los-límites-detallados)).
 - **Todo local por defecto.** Configuración, logs, historial, respaldos y snapshots en `%LOCALAPPDATA%\DefenderTray` (o en `.\DefenderTrayData\` con `-portable`).
 - **`config.dat` cifrado con DPAPI** en ámbito `CurrentUser`: el blob no sirve en otro usuario ni en otro equipo, y la contraseña SMTP viaja además protegida individualmente.
 - **Solo bucle invertido.** La API se enlaza a `127.0.0.1` (no a `+` ni a `*`), y `HttpListener` rechaza peticiones cuyo encabezado `Host` no corresponda al prefijo registrado, lo que corta el *DNS rebinding* clásico.
 - **Respaldo antes de romper.** `Backup-DefenderRegistry` exporta `HKLM\SOFTWARE\Policies\Microsoft\Windows Defender` a un `.reg` con marca de tiempo antes de la desactivación.
-- **Verificación en vez de confianza.** Cada secuencia acaba comprobando servicio, proceso, `Get-MpComputerStatus` y modo de arranque, y cada actualización puede comprobarse contra SHA256.
+- **Validación del auto-update, no firma de editor.** El actualizador comprueba el Git blob SHA-1 devuelto por la API, valida versión/parser, calcula SHA-256 sobre el contenido con finales de línea normalizados y conserva un `.bak`. Esas comprobaciones no sustituyen Authenticode ni una suma publicada por un canal independiente.
 - **La integración continua no ejecuta nada.** [`.github/workflows/ci.yml`](.github/workflows/ci.yml) analiza sintaxis, codificación y enlaces: no arranca DefenderTray ni toca el registro, así que las pruebas no abren una superficie nueva. Las únicas dependencias versionadas son las acciones de GitHub, vigiladas con [Dependabot](.github/dependabot.yml).
 
 **Qué sale del equipo y cuándo**
 
-| Canales (desactivados por defecto) | Destino | Contenido que viaja |
+| Canales | Destino | Contenido que viaja |
 |---|---|---|
 | Telegram Bot | `api.telegram.org` | Tu mensaje de alerta con el prefijo `[DefenderTray]`. |
 | Firebase Cloud Messaging | `oauth2.googleapis.com` y `fcm.googleapis.com` | Título, cuerpo y datos del evento, más el intercambio del token de tu cuenta de servicio. |
 | Webhooks | Las URL que tú configures | `{event, timestamp, host, payload}` → **incluye el nombre del equipo**. |
 | Correo SMTP | Tu relay | El cuerpo del reporte que generes. |
-| Comprobación de actualizaciones | `api.github.com` | Solo el `owner/repos` configurado (por defecto el marcador `usuario/DefenderTray`, que la desactiva). |
+| Comprobación de actualizaciones (activa por defecto) | `api.github.com` | Solicita el archivo de `owner/repo` y rama `main`; no envía datos del dispositivo. Puedes dejar el repositorio vacío para desactivarla. |
 | Proveedor SQLite | `www.nuget.org` | Nada tuyo: descarga un paquete público. |
 
 El modo **forense** y la consola **Fleet** trabajan solo con datos del propio equipo (nombre, IPv4 local, servicios, procesos, edad de firmas) y no los envían a ningún sitio.
 
 ## 🚧 Límites conocidos y mitigaciones
 
-Se enumeran con su estado real en v8.1. Ninguno tiene parche publicado; la columna de mitigación es lo que puedes hacer **hoy**.
+Los riesgos heredados se enumeran a continuación; revisa el detalle de cada mitigación antes de ejecutar la herramienta. L-5 describe el actualizador de v8.4.1.
 
 | ID | Límite | Gravedad | Mitigación inmediata |
 |---|---|---|---|
@@ -109,7 +109,7 @@ Se enumeran con su estado real en v8.1. Ninguno tiene parche publicado; la colum
 | L-2 | Exclusión de Defender sobre la carpeta del script, añadida **al arrancar y nunca retirada** | **Alta** | Ejecuta desde una carpeta propia vacía (`C:\DefenderTray`), nunca desde *Escritorio* ni *Descargas*; borra la exclusión al terminar. |
 | L-3 | `reg delete` sobre claves `CurrentVersion\Policies` de HKLM, WOW6432Node y HKCU, **sin respaldo previo** de esas tres | **Alta** | Exporta manualmente las claves antes de desactivar (comando abajo). |
 | L-4 | Tarea programada / «servicio» ejecuta el script **como `SYSTEM`** desde una ruta que puede ser escribible por usuarios | **Alta** | ACL estrictas en la carpeta (comando abajo) y desplegar solo en equipos de un solo administrador. |
-| L-5 | Autoactualización sin verificación de firma: el SHA256 solo se comprueba **si el release tiene** un asset `*.sha256`/checksums | Media | No lo uses sin publicar el hash; o deja `CfgGitHubRepo` en blanco y actualiza a mano. |
+| L-5 | Autoactualización descarga el script de `main` por HTTPS y comprueba Git blob SHA-1, parser y versión, pero **no una firma Authenticode ni un checksum independiente** | Media | Revisa el diff/procedencia del repositorio antes de confirmar; deja `CfgGitHubRepo` vacío para desactivar la comprobación/actualización automática. |
 | L-6 | Descarga automática del proveedor SQLite desde NuGet **sin comprobar hash** | Media | Preinstala las dos DLL en `lib\` o bloquea la salida a `www.nuget.org` del proceso. |
 | L-7 | Clave de cifrado de la base SQLite derivada del **nombre del equipo** (`DTv8_MasterKey_<EQUIPO>`) | Media | No guardes nada sensible en `defendertray.db`; la protección real es la ACL del archivo. |
 | L-8 | Contraseña de kiosco/desinstalación: SHA-256 **truncado a 16 hex**, sin sal, sin bloqueo por intentos, sin retardo | Media | Frase larga y única, o directamente no la actives en equipos compartidos. No la reutilices. |
@@ -144,7 +144,7 @@ Get-ScheduledTask -TaskName "DefenderTray_*" | ForEach-Object { $_.TaskName; $_.
 
 y desinstalar (`Unregister-ScheduledTask -TaskName "DefenderTray_Service" -Confirm:$false`) en cuanto no la necesites.
 
-**L-5 / L-6 — cadena de suministro.** La actualización copia el asset `.ps1`/`.zip` de un release sobre el script en ejecución (creando `*.v<versión>.bak`) y **solo** rechaza el cambio si existía un asset con el hash. La descarga de `System.Data.SQLite.Core` 1.0.118.1 desde NuGet tampoco se contrasta. Mientras no estén firmadas ambas rutas, haz la actualización a mano y con diff: `git diff --no-index viejo.ps1 nuevo.ps1`, y conserva los hashes que publicas.
+**L-5 / L-6 — cadena de suministro.** En v8.4.1, el actualizador consulta el Contents API de GitHub sobre `main`, comprueba el Git blob SHA-1 reportado por esa API, valida sintaxis/versión, compara SHA-256 del contenido normalizado y crea un `.bak` antes de sustituir el script. La conexión HTTPS autentica el endpoint de GitHub, pero no verifica quién aprobó el commit ni una firma del editor: una cuenta/repositorio comprometidos pueden publicar código válido y parseable. La descarga de `System.Data.SQLite.Core` 1.0.118.1 desde NuGet tampoco se contrasta. Para equipos sensibles, desactiva el update integrado y revisa manualmente el diff y la procedencia antes de ejecutar cualquier versión nueva.
 
 **L-7 / L-8 — crypto honesta: esto no es un sistema de secretos.** La contraseña del modo kiosco se compara contra `SHA256(texto)` truncado a 64 bits sin sal y con intentos ilimitados; la base de datos usa como contraseña `DTv8_MasterKey_<NOMBRE_DEL_EQUIPO>`: el nombre del equipo es público en un dominio y se lee sin permisos. Ninguno de los dos controles está pensado contra un atacante con tiempo y acceso al archivo, sino contra el uso accidental. Lo mismo para el **modo tutela** y para la contraseña de desinstalación: son un aviso, no una barrera.
 
@@ -159,13 +159,13 @@ y desinstalar (`Unregister-ScheduledTask -TaskName "DefenderTray_Service" -Confi
 7. **Restringe los canales salientes**: bot de Telegram solo para un chat propio, cuenta de servicio de Firebase con el rol mínimo de `roles/firebase.sdkAdminServiceAgent` y un proyecto aislado, webhooks a un destino TLS tuyo, y relay SMTP sin credenciales compartidas.
 8. **No dejes `-https` en reposo**: genera un certificado en el almacén del equipo (L-11); bórralo.
 9. **Limpia lo sensible**: `Forense\`, `Logs\`, `Auditoria\`, `updates\` y `Perfiles\` antes de entregar o reinstalar la máquina; y revisa `Get-MpPreference | Select-Object -ExpandProperty ExclusionPath`.
-10. **Actualiza con verificación**: publica `SHA256SUMS` con el release y confirma siempre `Get-FileHash` antes de ejecutar nada descargado.
+10. **Actualiza con revisión**: la actualización integrada desde `main` comprueba el blob y la sintaxis, pero no firma Authenticode; en equipos sensibles, desactívala, revisa el commit/diff y verifica el SHA-256 de un archivo descargado por un canal independiente antes de ejecutarlo.
 11. **Documenta el uso en tu organización**: si la política de tu empresa exige aprobación para tocar `DisableAntiSpyware`, la herramienta no te exime de tramitarla.
 12. **Asume que el `.ps1` es legible**: no hay ofuscación ni protección anticopia, y cualquiera con el archivo puede auditar lo que hace con sus privilegios.
 
 ## 🩺 Hacia dónde va el arreglo (para quien quiera parchear)
 
-Orden de prioridad que el mantenimiento acepta como base de trabajo, con el ancla de código correspondiente de la v8.1:
+Orden de prioridad futuro, con referencias históricas a la v8.1:
 
 1. **API local:** rechazar peticiones cuyo `Origin`/`Referer` no sea `http(s)://127.0.0.1:<puerto>`, aceptar solo `POST` en `/emergency` y `/fleet/command`, y validar `action` contra una lista blanca (`enable|disable`) antes de armar la línea de comandos. Añadir un token de sesión aleatorio en cabecera para todo lo que escriba ([`Initialize-RESTApi`](versiones/8/DefenderTray_8.1_Pro.ps1)).
 2. **Exclusión:** escribirla sobre la carpeta de datos propia y **quitarla** en la salida y en `Enable-Defender`, o hacerla opt-in explícito en Configuración ([`SECCION 62`](versiones/8/DefenderTray_8.1_Pro.ps1)).
@@ -194,7 +194,7 @@ DefenderTray is a **dual-use** tool: its purpose is to switch Microsoft Defender
 
 ### 📦 Supported versions
 
-**8.1 ULTIMATE** (branch `main`) receives security fixes; 8.0 gets the same patch while no 8.2 exists; 7.0, 6.0 and everything ≤ 5.0 Pro are unsupported. Always report the exact version **and SHA256** of the `.ps1` you run (`Get-FileHash`).
+**8.4.1 ULTIMATE** (branch `main`) is the maintained build and receives security fixes; older 8.x versions should be replaced. 7.0, 6.0 and everything ≤ 5.0 Pro are unsupported. Always report the exact version **and SHA256** of the `.ps1` you run (`Get-FileHash`).
 
 ### 📣 Reporting a vulnerability
 
@@ -211,7 +211,7 @@ We aim to acknowledge within **3 business days** and respond within **30 days** 
 
 **Out of scope:** Windows/Defender itself (report to [MSRC](https://msrc.microsoft.com/report/vulnerability)), machines already compromised by an attacker holding `SYSTEM`, physical attacks without BitLocker, social engineering, volumetric DoS, third-party provider issues without demonstrable impact on DefenderTray, older versions, modified third-party copies, and antivirus detections of the script (expected for its purpose).
 
-### 🚧 Known limitations (open in v8.1)
+### 🚧 Known limitations inherited from the v8.1 audit
 
 | ID | Limitation | Severity | Mitigate now |
 |---|---|---|---|
@@ -219,7 +219,7 @@ We aim to acknowledge within **3 business days** and respond within **30 days** 
 | L-2 | `Add-MpPreference -ExclusionPath <script folder>` runs at every elevated start and is **never removed** — anything in that folder escapes scanning (Downloads/Desktop are common choices) | **High** | Run from a dedicated, access-controlled folder; check `Get-MpPreference \| Select-Object -ExpandProperty ExclusionPath` and delete the exclusion afterwards. |
 | L-3 | `reg delete` removes four `Policies` keys but only `HKLM\SOFTWARE\Policies\Microsoft\Windows Defender` is backed up first | **High** | Export the other three yourself before disabling. |
 | L-4 | Scheduled tasks / "service" run the script as **`SYSTEM`** with `-ExecutionPolicy Bypass` from a possibly user-writable path → local privilege escalation primitive | **High** | `icacls "C:\DefenderTray" /inheritance:r /grant:r "*S-1-5-32-544:(OI)(CI)F" "*S-1-5-18:(OI)(CI)RX"`; unregister when done. |
-| L-5 | Auto-update verifies SHA256 **only if** the release ships a checksum asset, and does not check code signatures | Medium | Publish `SHA256SUMS`, or keep `CfgGitHubRepo` at its placeholder and update manually. |
+| L-5 | v8.4.1 auto-update checks Git blob SHA-1, parser and version from GitHub `main`, but does **not** check an Authenticode signature or an independent checksum | Medium | Review repository history/diff before confirming; set `CfgGitHubRepo` empty to disable the updater. |
 | L-6 | SQLite provider is auto-downloaded from NuGet **without hash verification** | Medium | Pre-place both DLLs in `lib\`, or block `www.nuget.org` for the process. |
 | L-7 | SQLite database password derives from the **computer name** (`DTv8_MasterKey_<HOST>`) | Medium | Store nothing sensitive in the DB; file ACLs are the actual control. |
 | L-8 | Kiosk/uninstall password is an **unsalted SHA-256 truncated to 16 hex chars**, no lockout or delay | Medium | Use a long unique passphrase and treat it as a speed bump, never a boundary; don't reuse it. |
