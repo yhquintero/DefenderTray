@@ -8,10 +8,10 @@
 
 🌐 **Español** · [English](#english)
 
-[![Versión](https://img.shields.io/badge/versi%C3%B3n-8.4.0%20ULTIMATE-4f46e5?style=flat-square)](versiones/8/DefenderTray_8.4_Pro.ps1)
+[![Versión](https://img.shields.io/badge/versi%C3%B3n-8.4.1%20ULTIMATE-4f46e5?style=flat-square)](versiones/8/DefenderTray_8.4_Pro.ps1)
 [![PowerShell](https://img.shields.io/badge/PowerShell-5.1%2B-012456?style=flat-square&logo=powershell&logoColor=white)](#-requisitos)
 [![Plataforma](https://img.shields.io/badge/Windows-10%20%C2%B7%2011%20%C2%B7%20Server-0078D4?style=flat-square&logo=windows&logoColor=white)](#-requisitos)
-[![Un solo archivo](https://img.shields.io/badge/un%20solo%20archivo-5612%20l%C3%ADneas-059669?style=flat-square)](versiones/8/DefenderTray_8.4_Pro.ps1)
+[![Un solo archivo](https://img.shields.io/badge/un%20solo%20archivo-5744%20l%C3%ADneas-059669?style=flat-square)](versiones/8/DefenderTray_8.4_Pro.ps1)
 [![API local](https://img.shields.io/badge/API%20local-REST%20%C2%B7%20GraphQL%20%C2%B7%20SSE%20%C2%B7%20PWA-1e1b4b?style=flat-square)](#-api-local)
 [![Licencia](https://img.shields.io/badge/licencia-propietaria-475569?style=flat-square)](LICENSE)
 [![Seguridad](https://img.shields.io/badge/seguridad-pol%C3%ADtica%20publicada-FF3366?style=flat-square)](SECURITY.md)
@@ -32,7 +32,7 @@
 
 El control **Activar / Desactivar** cambia la protección en tiempo real, **sin detener el motor, matar el actualizador ni borrar bases de firmas**. Windows puede reactivar automáticamente una pausa. El resultado se verifica con el proveedor de Defender; si está bloqueado o no se puede consultar, se informa sin inventar un éxito.
 
-> **Novedades en v8.4.0:** el botón **Cerrar** de *Event Log* ya cierra el diálogo (también con **Esc**), **Desactivar** apaga por completo tiempo real + protección en la nube (BAFS/MAPS) + envío automático de muestras, y **Activar** lo reactiva todo; el repo por defecto pasó a `yhquintero/DefenderTray` y *Buscar Actualización* migrará tu config sola. **No se tocan** servicios, controladores, exclusiones, rutas WSUS ni las bases de firmas (`.vdm`). Si aparece `0.0.0.0` en firmas, pulsa **Activar** y después **Reparar Firmas** para descargar inteligencia desde tu fuente sin borrar la existente. Esta modificación del código no repara automáticamente tu equipo; consulta las [pruebas y pasos de recuperación](tests/README.md).
+> **Novedades en v8.4.1:** además de los cambios de la 8.4.0 (corrección del diálogo *Event Log*, desactivación completa de RTP/nube/muestras y activación de vuelta), se corrige el error de sintaxis de la comprobación de conectividad. *Buscar Actualización* descarga ahora el script desde la rama `main` de GitHub (no requiere publicar un Release), valida la huella Git y el parser y conserva un respaldo antes de reemplazar. Si una copia 8.4.0 no arranca por un `ParserError`, PowerShell no puede ejecutar su auto-reparación: descarga [`Reparar-DefenderTray.ps1`](versiones/8/Reparar-DefenderTray.ps1) y úsalo según [estos pasos](#-solución-de-problemas). **No se tocan** servicios, controladores, exclusiones, rutas WSUS ni las bases de firmas (`.vdm`). Si aparece `0.0.0.0` en firmas, pulsa **Activar** y después **Reparar Firmas** para descargar inteligencia desde tu fuente sin borrar la existente.
 
 A partir de la rama 8.x el proyecto dejó de ser un simple *toggle* y añade una capa de **operaciones**: API REST/GraphQL local, panel web en tiempo real (SSE), PWA instalable, firma de reportes, exportación a Excel/CSV y PDF, alertas por Telegram, Firebase, SMTP y webhooks, modo auditoría, modo forense, agente residente por WMI y detección de anomalías.
 
@@ -49,8 +49,8 @@ A partir de la rama 8.x el proyecto dejó de ser un simple *toggle* y añade una
 | 🗄️ **Historial y datos** | SQLite cifrado cuando el proveedor está disponible y JSON como respaldo: cada acción queda registrada con resultado y duración; exportación a CSV/Excel y estadísticas. |
 | 🌐 **API local** | `HttpListener` en `127.0.0.1:9182` con REST, un subconjunto GraphQL, `SSE` para el panel en vivo, consola Fleet y PWA instalable. HTTP o HTTPS con certificado autofirmado. |
 | 🔔 **Notificaciones** | Telegram Bot, Firebase Cloud Messaging (FCM v1), correo SMTP, webhooks JSON propios y alerta umbral («Defender lleva X horas desactivado»). |
-| 🏢 **Capa empresarial** | Inventario de Active Directory, firma Authenticode de reportes y guía de certificado EV, generador de instalador MSI (WiX), `Dockerfile`/`docker-compose` para la consola, modo auditoría, modo forense y autoactualización desde GitHub Releases con verificación SHA256. |
-| 📚 **Histórico de versiones** | 38 scripts PowerShell desde la v1 hasta la v8.2, indexados uno a uno en [`versiones/README.md`](versiones/README.md) y narrados en el [registro de cambios](CHANGELOG.md). |
+| 🏢 **Capa empresarial** | Inventario de Active Directory, firma Authenticode de reportes y guía de certificado EV, generador de instalador MSI (WiX), `Dockerfile`/`docker-compose` para la consola, modo auditoría, modo forense y autoactualización desde la rama `main` de GitHub por Contents API; comprueba el SHA del blob y la sintaxis antes de instalar y guarda un respaldo. |
+| 📚 **Histórico de versiones** | 38 scripts de versión de la aplicación (incluida 8.4.1), más la herramienta de recuperación, indexados en [`versiones/README.md`](versiones/README.md) y narradas en el [registro de cambios](CHANGELOG.md). |
 
 ## ✨ Funciones destacadas
 
@@ -79,20 +79,20 @@ A partir de la rama 8.x el proyecto dejó de ser un simple *toggle* y añade una
 
 ## 🚀 Inicio rápido
 
-Copia [`DefenderTray_8.3_Pro.ps1`](versiones/8/DefenderTray_8.3_Pro.ps1) a una carpeta dedicada y con permisos cerrados (`C:\DefenderTray` es la opción razonable): si lo dejas en *Escritorio* o *Descargas*, quien pueda escribir sobre ese archivo puede acabar ejecutándolo como `SYSTEM` si además usas el programador — ver [SECURITY.md](SECURITY.md#-límites-conocidos-y-mitigaciones) (L-2 y L-4):
+Copia [`DefenderTray_8.4_Pro.ps1`](versiones/8/DefenderTray_8.4_Pro.ps1) a una carpeta dedicada y con permisos cerrados (`C:\DefenderTray` es la opción razonable): si lo dejas en *Escritorio* o *Descargas*, quien pueda escribir sobre ese archivo puede acabar ejecutándolo como `SYSTEM` si además usas el programador — ver [SECURITY.md](SECURITY.md#-límites-conocidos-y-mitigaciones) (L-2 y L-4):
 
 ```powershell
 # 0) Comprueba que el archivo es el que esperas
-Get-FileHash .\DefenderTray_8.3_Pro.ps1 -Algorithm SHA256
+Get-FileHash .\DefenderTray_8.4_Pro.ps1 -Algorithm SHA256
 
 # 1) Abre PowerShell como Administrador y mira qué haría, sin tocar nada
-powershell -NoProfile -ExecutionPolicy Bypass -File .\DefenderTray_8.3_Pro.ps1 -audit
+powershell -NoProfile -ExecutionPolicy Bypass -File .\DefenderTray_8.4_Pro.ps1 -audit
 
 # 2) Panel interactivo (icono en la bandeja + ventana de control)
-powershell -NoProfile -ExecutionPolicy Bypass -File .\DefenderTray_8.3_Pro.ps1
+powershell -NoProfile -ExecutionPolicy Bypass -File .\DefenderTray_8.4_Pro.ps1
 
 # 3) Modo sin consola, para tareas programadas o despliegue por GPO
-powershell -NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File .\DefenderTray_8.3_Pro.ps1 -silent -norest
+powershell -NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File .\DefenderTray_8.4_Pro.ps1 -silent -norest
 ```
 
 **Antes de desactivar en Windows 11:** la *Protección frente a manipulaciones* o las políticas de una organización pueden impedir el cambio. DefenderTray no fuerza el cierre de procesos ni cambia Tamper Protection por registro: informa del bloqueo. No modifiques políticas corporativas sin autorización. Una instalación afectada por versiones antiguas puede requerir recuperación selectiva y reinicio antes de recuperar el estado normal.
@@ -100,7 +100,7 @@ powershell -NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File .\Defend
 Para arrancarlo con doble clic, crea un acceso directo con este destino:
 
 ```text
-C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File "C:\DefenderTray\DefenderTray_8.3_Pro.ps1" -silent
+C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File "C:\DefenderTray\DefenderTray_8.4_Pro.ps1" -silent
 ```
 
 > [!TIP]
@@ -134,7 +134,7 @@ Abre una consola nueva despues: el PATH guardado por Windows solo se lee al arra
 **2) Compilar el MSI:**
 
 ```powershell
-.\versiones\8\build-msi.ps1                # v8.4.0 -> %USERPROFILE%\Desktop\DefenderTray_v8.2_MSI
+.\versiones\8\build-msi.ps1 -Version 8.4 # script 8.4.1 -> DefenderTray_v8.4_MSI
 .\versiones\8\build-msi.ps1 -Version 8.1   # otra version
 ```
 
@@ -143,7 +143,7 @@ O a mano, con los mismos interruptores que usa el script:
 ```powershell
 cd C:\Users\usuario\Desktop\DefenderTray_v8_MSI
 candle.exe -nologo -arch x64 -ext WixUIExtension DefenderTray.wxs
-light.exe  -nologo -ext WixUIExtension -o DefenderTray_v8.4.0.msi DefenderTray.wixobj
+light.exe  -nologo -ext WixUIExtension -o DefenderTray_v8.4.msi DefenderTray.wixobj
 ```
 
 **Errores ICE que ya no salen** (y por que):
@@ -192,7 +192,7 @@ Consola con recuperación selectiva de bloqueos, servicios, `gpupdate`, `sfc /sc
 | `-norest` | No levanta la API local (recomendado en servidores y equipos compartidos). |
 | `-https` | Sirve la API por HTTPS con certificado autofirmado (`CN=DefenderTray Localhost`, 5 años) en `LocalMachine\My`. |
 | `-action enable` / `-action disable` | Ejecuta la acción por consola y sale con código `0`. |
-| `-autoupdate` | Comprueba si hay una versión nueva en GitHub Releases y lo deja en el log. |
+| `-autoupdate` | Comprueba si hay una versión nueva en el script de `main` de GitHub y lo deja en el log; la opción no instala sin confirmación. |
 | `-noelevate` | No se auto-eleva a Administrador: sigue con los permisos que tenga. Para pruebas, auditoria o equipos sin UAC. |
 
 ## 🌐 API local
@@ -236,12 +236,12 @@ Rutas por defecto (`-portable` las mueve a `.\DefenderTrayData\`):
 | `…\Perfiles\profiles.json` | Perfiles multiusuario (respaldo JSON). |
 | `…\historial.json` · `…\defendertray.db` | Historial: JSON siempre, SQLite cuando el proveedor está disponible. |
 | `…\lib\` | `System.Data.SQLite.dll` y `SQLite.Interop.dll` autodescargados. |
-| `…\updates\` | Descargas de la autoactualización y `*.v<versión>.bak` del script. |
+| `…\updates\` | Reservada para descargas auxiliares; el actualizador GitHub reemplaza el script local tras validarlo y guarda `*.bak` junto al `.ps1`. |
 
 Opciones del diálogo **Configuración**: auto-reparar firmas al iniciar (si superan 30 días), limpiar logs viejos, seguir el tema del sistema, alerta umbral con horas configurables, agente residente WMI, API REST y puerto, HTTPS, modo kiosco (+ biométrico), firmar reportes con Authenticode, SMTP completo, Telegram (token y *chat id*), Firebase (project id, JSON de cuenta de servicio y token), detección de anomalías y umbral Z, modo forense, apertura en monitor activo, modo tutela, copia a una carpeta de red/nube sincronizada, repo de GitHub para actualizaciones y paleta de colores personalizada.
 
 > [!NOTE]
-> Los campos de terceros (`CfgGitHubRepo`) vienen por defecto con el marcador `usuario/DefenderTray`, que **desactiva** la comprobación de actualizaciones hasta que pongas un repositorio real. A cambio, todo lo demás funciona sin configurar nada.
+> `CfgGitHubRepo` apunta por defecto a `yhquintero/DefenderTray`. DefenderTray consulta la rama `main` mediante la API pública de GitHub; la descarga solo reemplaza el `.ps1` después de confirmación, validación del parser y respaldo local. Puedes cambiar el repositorio en Configuración o dejarlo vacío para desactivar esta comprobación.
 
 ## 🧭 Versiones
 
@@ -249,8 +249,8 @@ El código vive en [`versiones/`](versiones/), una carpeta por hito. Esta es la 
 
 | Versión | Archivo | Qué aportó |
 |---|---|---|
-| **8.4.0 ULTIMATE** ⭐ | [`versiones/8/DefenderTray_8.3_Pro.ps1`](versiones/8/DefenderTray_8.3_Pro.ps1) | Recomendada. Sobre la 8.3 añade: atajos **Alt+letra**, Enter/Esc en todos los diálogos, **Backup offline de firmas** (.vdm), verificación de **firma Authenticode** de motor/drivers en Diagnóstico, log detallado de cada preferencia rechazada, toasts distintos para cambios **PARCIALES**, y **modo de toggle** configurable en Ajustes (Full = RTP+Nube+Muestras / Solo RTP = compat. v8.2). Sigue sin tocar servicios, controladores, exclusiones WSUS ni bases de firmas. |
-| 8.3 ULTIMATE | — | Fix botón **Cerrar** de Event Log; Esc en diálogos; desactivación COMPLETA nube+muestras+RTP; repo por defecto `yhquintero/DefenderTray`; toggle rápido por splatting individual. Integrada en 8.4.0. |
+| **8.4.1 ULTIMATE** ⭐ | [`versiones/8/DefenderTray_8.4_Pro.ps1`](versiones/8/DefenderTray_8.4_Pro.ps1) | Recomendada. Sobre la 8.3.1 añade atajos **Alt+letra**, Enter/Esc, backup offline y verificación Authenticode de firmas, modo de toggle configurable, corrección del ParserError y actualización desde `main` con verificación de contenido/parser y respaldo. Sigue sin tocar servicios, controladores, exclusiones WSUS ni bases de firmas. |
+| 8.3 ULTIMATE | — | Fix botón **Cerrar** de Event Log; Esc en diálogos; desactivación COMPLETA nube+muestras+RTP; repo por defecto `yhquintero/DefenderTray`; toggle rápido por splatting individual. Integrada en 8.4.1. |
 | 8.2 ULTIMATE | [`versiones/8/DefenderTray_8.2_Pro.ps1`](versiones/8/DefenderTray_8.2_Pro.ps1) | Botones **Activar / Desactivar** adyacentes y según estado real; fix crítico de `Set-MpPreference` por splatting; pausa de tiempo real conservando motor y firmas, recuperación selectiva de bloqueos antiguos y actualización no destructiva de inteligencia. |
 | 8.1 ULTIMATE | [`versiones/8/DefenderTray_8.1_Pro.ps1`](versiones/8/DefenderTray_8.1_Pro.ps1) | SQLite cifrado, firma Authenticode + guía EV, MSI con WiX, FCM v1, consola Fleet, anomalías por Z-score, Active Directory, GraphQL, PWA, kiosco biométrico, webhooks, Excel/CSV, panel SSE, autoactualización con SHA256 y empaquetado Docker. *Nota honesta:* v8.1 es **el mismo código que v8.0** con las cadenas de versión actualizadas (142 líneas, todas de texto). |
 | 8.0 ULTIMATE | [`versiones/8/DefenderTray_8.0_Pro.ps1`](versiones/8/DefenderTray_8.0_Pro.ps1) | Salto a «Enterprise Security Control»: las 15 funciones anteriores. |
@@ -272,7 +272,7 @@ El código vive en [`versiones/`](versiones/), una carpeta por hito. Esta es la 
 | [CONTRIBUTING.md](CONTRIBUTING.md) | Entorno, banco de pruebas en VM, estilo del proyecto, reglas de versionado y revisión sensible. |
 | [SECURITY.md](SECURITY.md) | Reporte privado, alcance, modelo de amenazas, 14 límites conocidos con su mitigación y endurecimiento. |
 | [LICENSE](LICENSE) | Licencia propietaria bilingüe (español prevalece), con la cláusula de uso responsable. |
-| [`versiones/README.md`](versiones/README.md) | Índice del histórico: 38 `.ps1` con tamaño, estado y una línea de contexto. |
+| [`versiones/README.md`](versiones/README.md) | Índice del histórico: versiones históricas `.ps1` más las herramientas de recuperación, con tamaño, estado y una línea de contexto. |
 | [`.github/workflows/ci.yml`](.github/workflows/ci.yml) | Comprobaciones: sintaxis (bloqueante en la v8), codificación y CRLF, PSScriptAnalyzer y enlaces de la documentación. |
 | [`.github/ISSUE_TEMPLATE/`](.github/ISSUE_TEMPLATE/) · [`.github/PULL_REQUEST_TEMPLATE.md`](.github/PULL_REQUEST_TEMPLATE.md) | Plantillas de informe de error, propuesta de mejora y pull request. |
 | [`.gitignore`](.gitignore) · [`.gitattributes`](.gitattributes) | Qué queda fuera del repositorio y por qué los `.ps1` viajan con CRLF. |
@@ -281,9 +281,10 @@ El código vive en [`versiones/`](versiones/), una carpeta por hito. Esta es la 
 
 | Síntoma | Causa habitual | Qué hacer |
 |---|---|---|
-| `[!] Tamper Protection ACTIVA` en el log | La protección frente a manipulaciones bloquea los cambios. | La v8.2 informa del rechazo sin forzar servicios ni procesos. Revisa Seguridad de Windows y las políticas del administrador. |
+| `[!] Tamper Protection ACTIVA` en el log | La protección frente a manipulaciones bloquea los cambios. | La v8.4.1 informa del rechazo sin forzar servicios ni procesos. Revisa Seguridad de Windows y las políticas del administrador. |
 | `[!] DESACTIVACION INCOMPLETA` | GPO de dominio, tarea de remediación o Tamper Protection revirtiendo valores. | Revisa el log del resultado; con `-audit` verás las claves en juego. En dominio, la política de grupo manda sobre este script. |
 | Doble clic y se cierra al instante | Política de ejecución o falta de administración. | Ejecuta con `-ExecutionPolicy Bypass` desde una PowerShell elevada y revisa `Logs\`. |
+| `ParserError` al arrancar 8.4 (por ejemplo, `InvalidVariableReferenceWithDrive`) | Un error de análisis impide que PowerShell ejecute cualquier parte del archivo. | Descarga [`Reparar-DefenderTray.ps1`](versiones/8/Reparar-DefenderTray.ps1) desde GitHub y ejecútalo como Administrador: `powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\Reparar-DefenderTray.ps1 -TargetPath "C:\DefenderTray_8.4_Pro.ps1"`. Valida el archivo antes de sustituirlo y guarda un `.bak`. |
 | `Start=4: PENDIENTE` | GPO de dominio o una tarea de remediación revierte el valor. | Con `-audit` verás las claves en juego; en dominio, se resuelve con la GPO, no con este script. |
 | «Reparación de firmas» no termina (errores 31 / 12 / 1969) | Base de firmas corrupta o `WinDefend` detenido. | Pulsa **Activar** si el motor quedó bloqueado por una versión anterior y después **Reparar Firmas**. Si falla, revisa el log, la red y Seguridad de Windows; no borres definiciones para reintentar. |
 | `REST no arranco` o el puerto está ocupado | Otro proceso escucha en 9182 o falta la reserva `urlacl`. | Cambia el puerto en Configuración, arranca con `-norest`, o revisa las reservas con `netsh http show urlacl` y libera la antigua con `netsh http delete urlacl`.  |
@@ -296,7 +297,7 @@ El código vive en [`versiones/`](versiones/), una carpeta por hito. Esta es la 
 
 ## 🔐 Seguridad
 
-- **Por defecto, nada sale del equipo.** Sin Telegram, Firebase, SMTP, webhooks ni repositorio de actualizaciones configurados, la herramienta no hace ninguna petición de red — salvo la descarga opcional de SQLite.
+- **No se envían datos del equipo en la comprobación de actualizaciones.** La versión actual consulta `api.github.com` (rama pública `main`) y puede descargar el script solo tras confirmación; SQLite puede descargarse de NuGet. Telegram, Firebase, SMTP y webhooks siguen siendo opt-in.
 - **Solo bucle invertido.** La API escucha en `127.0.0.1` y no se expone a la red; no la abras con reenvíos de puerto ni la publiques.
 - **Credenciales cifradas con DPAPI** (ámbito usuario) en `config.dat`; el `TelegramToken` y el JSON de cuenta de servicio quedan dentro de ese blob: quien pueda iniciar sesión como tú, puede leerlos.
 - **Auditoría local.** Cada acción, su resultado y su duración quedan en el historial (SQLite/JSON) y en los logs; en modo `-audit` se escribe además `Auditoria\`, para poder explicar después qué se tocó.
@@ -316,7 +317,8 @@ versiones/
   5/  DefenderTray_5.0_Pro.ps1                 Programador, servicio, backup/restore
   6/  DefenderTray_6.0_Pro.ps1                 API REST, DPAPI, Windows Server, -audit
   7/  DefenderTray_7.0_Pro.ps1                 Panel web, Telegram, modo forense y tutela
-  8/  DefenderTray_8.0_Pro.ps1, 8.1_Pro.ps1, 8.2_Pro.ps1   Capa «enterprise» (la recomendada)
+  8/  DefenderTray_8.0_Pro.ps1 … DefenderTray_8.4_Pro.ps1  Capa «enterprise» (8.4.1 recomendada)
+      Reparar-DefenderTray.ps1                              Recuperador independiente para un ParserError
       DefenderTray.wxs, build-msi.ps1, Add-WiXToPath.ps1    Plantilla MSI (WiX v3) y ayudas de compilacion
   README.md                                    Índice del histórico y reglas de la carpeta
 
@@ -329,7 +331,7 @@ CHANGELOG.md · README.md · CONTRIBUTING.md · LICENSE · SECURITY.md
 .gitattributes · .gitignore
 ```
 
-Es un repositorio de **un solo archivo ejecutable por versión**: no hay árbol `src/`, ni compilación, ni gestores de paquetes. Cada `.ps1` es autónomo y autocontenido (145 funciones en la v8.2), lo que facilita copiarlo a un equipo aislado y lo que hace que el tamaño llame la atención. Los archivos con sufijos `.backup_*`, `- copia - copia` y el marcador `revisar` son residuos del desarrollo histórico: no los uses como referencia, toma siempre la v8.2. Se listan y explican en [CHANGELOG.md](CHANGELOG.md#-pendientes-de-limpieza-registrados), y [`.gitignore`](.gitignore) ya impide que se generen otros nuevos.
+Cada versión de la aplicación es un `.ps1` autónomo y autocontenido: no hay árbol `src/`, compilación ni gestores de paquetes. La versión recomendada es la 8.4.1; `Reparar-DefenderTray.ps1` es una herramienta aparte para recuperar una copia que no llega a parsear. Los archivos `.backup_*`, `- copia - copia` y el marcador `revisar` son residuos del desarrollo histórico: no los uses como referencia. Se listan y explican en [CHANGELOG.md](CHANGELOG.md#-pendientes-de-limpieza-registrados), y [`.gitignore`](.gitignore) ya impide que se generen otros nuevos.
 
 ## ❓ Preguntas frecuentes
 
@@ -374,7 +376,7 @@ Para diagnosticar y para inventario de AD, sí. Para desactivar de forma persist
 
 <br />
 
-Nombre de equipo y dirección IPv4 local (para la consola Fleet), estado de servicios y firmas, y lo que tú escribas en Configuración. Las capturas del modo forense sí contienen **lo que haya en pantalla**: actívalo solo en máquinas propias y limpia `Forense\` antes de entregar el equipo. No hay analíticas, ni publicidad, ni servidores propios: si activas Telegram, Firebase o webhooks, el mensaje viaja a esos proveedores con el nombre de tu equipo.
+Nombre de equipo y dirección IPv4 local (para la consola Fleet), estado de servicios y firmas, y lo que tú escribas en Configuración. Las capturas del modo forense sí contienen **lo que haya en pantalla**: actívalo solo en máquinas propias y limpia `Forense\` antes de entregar el equipo. No hay analíticas, publicidad ni servidores propios. La comprobación automática de GitHub consulta el archivo público de `main` (GitHub ve tu IP y la ruta solicitada, no el nombre del equipo/configuración); Telegram, Firebase y webhooks envían los mensajes que configures con el nombre del equipo.
 
 </details>
 
@@ -442,12 +444,12 @@ El repositorio es público y el código legible, pero eso no concede derechos de
 **Quick start.**
 
 ```powershell
-Get-FileHash .\DefenderTray_8.3_Pro.ps1 -Algorithm SHA256                      # verify what you downloaded
-powershell -NoProfile -ExecutionPolicy Bypass -File .\DefenderTray_8.3_Pro.ps1 -audit    # read-only dry run
-powershell -NoProfile -ExecutionPolicy Bypass -File .\DefenderTray_8.3_Pro.ps1           # interactive panel
+Get-FileHash .\DefenderTray_8.4_Pro.ps1 -Algorithm SHA256                      # verify what you downloaded
+powershell -NoProfile -ExecutionPolicy Bypass -File .\DefenderTray_8.4_Pro.ps1 -audit    # read-only dry run
+powershell -NoProfile -ExecutionPolicy Bypass -File .\DefenderTray_8.4_Pro.ps1           # interactive panel
 ```
 
-On Windows 11, Tamper Protection or managed policies may reject a change. The corrected v8.2 pauses real-time protection only, leaves the engine and updater running, and never deletes definitions when updating signatures. Enable/Disable buttons are side by side and follow the confirmed provider state. Legacy service blocks may need recovery and a reboot. See the [safe test and recovery protocol](tests/README.md).
+On Windows 11, Tamper Protection or managed policies may reject a change. The maintained v8.4.1 changes RTP, cloud protection and sample submission according to the configured toggle mode; it never deletes definitions when updating signatures. Enable/Disable buttons follow the confirmed provider state. Legacy service blocks may need recovery and a reboot. See the [safe test and recovery protocol](tests/README.md).
 
 **Switches.** `-silent` (no dialogs), `-portable` (data next to the script), `-audit` (log only, apply nothing), `-norest` (no local API), `-https` (self-signed TLS), `-action enable|disable`, `-autoupdate`, `-noelevate` (do not ask for elevation).
 
@@ -457,9 +459,9 @@ On Windows 11, Tamper Protection or managed policies may reject a change. The co
 
 **Local API.** Serves on `127.0.0.1:9182` only: `/` (SSE dashboard), `/status`, `/enable`, `/disable`, `/emergency` (executes re-activation), `/diagnostic`, `/fleet`, `/fleet/computers`, `POST /fleet/command`, `POST /fleet/broadcast`, `POST /graphql`, `/sse/stream`, `/pwa/*`. **There is no authentication**, so run with `-norest` on shared or server machines.
 
-**Privacy.** Nothing leaves the machine unless you configure Telegram, Firebase Cloud Messaging, SMTP, webhooks or the GitHub update check. Settings are stored DPAPI-encrypted (current user) in `%LOCALAPPDATA%\DefenderTray\config.dat`; forensic screenshots are **not** encrypted.
+**Privacy.** By default, v8.4.1 checks the public script endpoint on `api.github.com` after startup; the request identifies the repository/file and sends no machine name or configuration. No script is replaced without confirmation. Telegram, Firebase Cloud Messaging, SMTP and webhooks are separately configurable. Settings are stored DPAPI-encrypted (current user) in `%LOCALAPPDATA%\DefenderTray\config.dat`; forensic screenshots are **not** encrypted.
 
-**Status of features.** v8.2 is the reference build: verified real-time enable/pause, non-destructive signature updates and state-aware adjacent buttons. Note that multi-machine fleet support is a local skeleton rather than a central server, and that voice control is a stub. Read [SECURITY.md](SECURITY.md) for the honest list of known limits and mitigations, [CONTRIBUTING.md](CONTRIBUTING.md) for conventions and safe testing, [CHANGELOG.md](CHANGELOG.md) for the version history, and [LICENSE](LICENSE) for terms. Continuous integration (`.github/workflows/ci.yml`) checks PowerShell syntax, file encoding and documentation links without ever running the tool.
+**Status of features.** v8.4.1 is the recommended build: verified real-time enable/pause, non-destructive signature updates, state-aware adjacent buttons, and a GitHub `main` updater with syntax validation and local backup. Note that multi-machine fleet support is a local skeleton rather than a central server, and that voice control is a stub. Read [SECURITY.md](SECURITY.md) for the honest list of known limits and mitigations, [CONTRIBUTING.md](CONTRIBUTING.md) for conventions and safe testing, [CHANGELOG.md](CHANGELOG.md) for the version history, and [LICENSE](LICENSE) for terms. Continuous integration (`.github/workflows/ci.yml`) checks PowerShell syntax, file encoding and documentation links without ever running the tool.
 
 ---
 

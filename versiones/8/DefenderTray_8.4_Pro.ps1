@@ -1,8 +1,8 @@
 <#
 ================================================================================
-  DefenderTray v8.4.0 ULTIMATE - Enterprise Security Control
+  DefenderTray v8.4.1 ULTIMATE - Enterprise Security Control
 ================================================================================
-  Correcciones v8.4.0:
+  Correcciones v8.4.1:
     A. BOTON CERRAR en "Event Log" ya cierra el dialogo (fijada captura de
        variable $dlg con GetNewClosure en todos los botones Cerrar). Todos
        los dialogos responden tambien a la tecla Esc.
@@ -18,7 +18,10 @@
        Set-MpPreference se aplica individualmente con splatting correcto
        (fix v8.2).
     E. Revision exhaustiva de todos los botones y handlers de la App.
-  Mejoras v8.4.0:
+    F. Error de parser corregido al delimitar ${h} antes de los dos puntos.
+    G. Buscar Actualizacion consulta la rama main de GitHub, sin exigir Release.
+    H. Reparacion con respaldo y validacion de SHA, version y sintaxis antes de sustituir.
+  Mejoras v8.4.1:
     F. Atajos Alt+letra en botones; Enter=aceptar, Esc=cancelar en todos
        los dialogos.
     G. Diagnostico verifica firma Authenticode del motor y drivers, mas
@@ -268,7 +271,7 @@ function Normalize-LineEndings {
 # ============================================================================
 $script:Strings = @{
     ES = @{
-        Title = "Control de Seguridad v8.4.0 ULTIMATE"
+        Title = "Control de Seguridad v8.4.1 ULTIMATE"
         Activar = "ACTIVAR PROTECCION"
         Desactivar = "DESACTIVAR PROTECCION"
         Diagnostico = "DIAGNOSTICO"
@@ -286,7 +289,7 @@ $script:Strings = @{
         ToggleFinishOn  = "UN CLIC - TERMINAR DE ACTIVAR"
     }
     EN = @{
-        Title = "Security Control v8.4.0 ULTIMATE"
+        Title = "Security Control v8.4.1 ULTIMATE"
         Activar = "ENABLE PROTECTION"
         Desactivar = "DISABLE PROTECTION"
         Diagnostico = "DIAGNOSTICS"
@@ -356,7 +359,7 @@ $script:CfgFCMToken        = ""
 $script:CfgAnomalyEnabled  = $true
 $script:CfgAnomalyZ        = 3.0
 $script:CfgGitHubRepo      = "yhquintero/DefenderTray"
-# --- v8.4.0 ---
+# --- v8.4.1 ---
 # Modo de desactivacion: "Full"  = desactiva RTP + Nube + Muestras (la opcion segura)
 #                        "RTP"   = solo pausa tiempo real (compatibilidad v8.2)
 $script:CfgToggleMode      = "Full"
@@ -1145,7 +1148,7 @@ function Get-EVStatus {
 
 function Show-CertificateGuide {
     $msg = @"
-GUIA DE FIRMA DIGITAL - DefenderTray v8.4.0
+GUIA DE FIRMA DIGITAL - DefenderTray v8.4.1
 ==========================================
 
 1. FIRMA DE DESARROLLO (gratis - solo confianza local)
@@ -1250,7 +1253,7 @@ function New-WixInstallerPackage {
         <Directory Id="ProgramMenuDir" Name="DefenderTray">
           <Component Id="StartMenuShortcut" Guid="*" Win64="yes">
             <Shortcut Id="AppShortcut" Directory="ProgramMenuDir"
-                      Name="DefenderTray v8.4.0"
+                      Name="DefenderTray v8.4.1"
                       Target="[System64Folder]WindowsPowerShell\v1.0\powershell.exe"
                       Arguments="-NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File &quot;[INSTALLFOLDER]DefenderTray_8.2.ps1&quot;"
                       WorkingDirectory="INSTALLFOLDER"/>
@@ -1260,7 +1263,7 @@ function New-WixInstallerPackage {
         </Directory>
       </Directory>
     </Directory>
-    <Feature Id="MainFeature" Title="DefenderTray v8.4.0" Level="1">
+    <Feature Id="MainFeature" Title="DefenderTray v8.4.1" Level="1">
       <ComponentRef Id="MainScript"/>
       <ComponentRef Id="StartMenuShortcut"/>
     </Feature>
@@ -1275,7 +1278,7 @@ function New-WixInstallerPackage {
 {\rtf1\ansi\deff0
 {\fonttbl{\f0 Segoe UI;}}
 \f0\fs20
-{\b DefenderTray v8.4.0 - Licencia de uso}\par
+{\b DefenderTray v8.4.1 - Licencia de uso}\par
 \par
 Software de administracion de seguridad. Uso bajo responsabilidad del operador.\par
 Autor: Ing. Yosvany Hernandez Quintero\par
@@ -1286,14 +1289,14 @@ Movil: +53 5 2160801 / +53 5 9860911\par
 
         $candle = Get-WixToolPath -Ejecutable "candle.exe"
         $light  = Get-WixToolPath -Ejecutable "light.exe"
-        $msiPath = Join-Path $OutputDir "DefenderTray_v8.4.0.msi"
+        $msiPath = Join-Path $OutputDir "DefenderTray_v8.4.1.msi"
 
         if ($candle -and $light) {
             Push-Location $OutputDir
             try {
                 $null = & $candle -nologo -arch x64 -ext WixUIExtension DefenderTray.wxs 2>&1
                 if (Test-Path "DefenderTray.wixobj") {
-                    $null = & $light -nologo -ext WixUIExtension -o "DefenderTray_v8.4.0.msi" DefenderTray.wixobj 2>&1
+                    $null = & $light -nologo -ext WixUIExtension -o "DefenderTray_v8.4.1.msi" DefenderTray.wixobj 2>&1
                 }
             } finally { Pop-Location }
             if (Test-Path $msiPath) { return "MSI generado: $msiPath" }
@@ -1314,7 +1317,7 @@ Para generar el MSI:
   3. Ejecuta de nuevo esta opcion, o manualmente:
      cd "$OutputDir"
      candle.exe -nologo -arch x64 -ext WixUIExtension DefenderTray.wxs
-     light.exe  -nologo -ext WixUIExtension -o DefenderTray_v8.4.0.msi DefenderTray.wixobj
+     light.exe  -nologo -ext WixUIExtension -o DefenderTray_v8.4.1.msi DefenderTray.wixobj
 "@
     } catch { return "Error: $($_.Exception.Message)" }
 }
@@ -1446,7 +1449,7 @@ td{font-size:13px}tr:hover td{background:#0A1628}
 .toolbar{display:flex;gap:10px;margin-bottom:16px}.btn{padding:10px 18px;border-radius:6px;border:none;color:#fff;font-weight:bold;cursor:pointer;font-size:12px}
 .btn-blue{background:#008CFF}.btn-green{background:#00C86C}.btn-red{background:#FF3366}
 </style></head><body>
-<div class="header"><h1>DefenderTray Fleet Console</h1><div class="sub">Panel multi-equipo — v8.4.0</div></div>
+<div class="header"><h1>DefenderTray Fleet Console</h1><div class="sub">Panel multi-equipo — v8.4.1</div></div>
 <div class="container">
 <div class="stats">
 <div class="stat ok"><div class="lbl">Activos</div><div class="val" id="sActivos">—</div></div>
@@ -1610,7 +1613,7 @@ function Get-ADInventory {
 function Show-ADDialog {
     $info = Get-ADInventory
     $msg = @"
-ACTIVE DIRECTORY - v8.4.0
+ACTIVE DIRECTORY - v8.4.1
 =======================
 Modulo disponible: $($info.Disponible)
 Dominio:           $(if($info.Dominio){$info.Dominio}else{'(no detectado)'})
@@ -1697,7 +1700,7 @@ body{font-family:-apple-system,'Segoe UI',sans-serif;background:#070B14;color:#E
 .btn-on{background:#00C86C}.btn-off{background:#FF3366}.btn-diag{background:#008CFF}.btn-emerg{background:#B14EFF}
 .info{color:#6B7A99;font-size:11px;text-align:center;margin-top:20px}
 </style></head><body>
-<div class="header"><h1>DefenderTray</h1><div class="sub">v8.4.0 ULTIMATE — Panel movil</div></div>
+<div class="header"><h1>DefenderTray</h1><div class="sub">v8.4.1 ULTIMATE — Panel movil</div></div>
 <div id="status" class="status">...</div>
 <div class="card"><div class="lbl">Servicio</div><div id="svc" class="val">—</div></div>
 <div class="card"><div class="lbl">Motor</div><div id="eng" class="val">—</div></div>
@@ -1931,7 +1934,7 @@ h1{color:#00E5FF;border-bottom:2px solid #00E5FF;padding-bottom:12px}
 .log .line.info{color:#6B7A99}.log .line.ok{color:#00E56C}.log .line.warn{color:#FFAA00}.log .line.err{color:#FF3366}
 .status-dot{display:inline-block;width:10px;height:10px;border-radius:50%;margin-right:8px;background:#00E56C;animation:pulse 2s infinite}
 @keyframes pulse{0%,100%{opacity:1}50%{opacity:.4}}</style></head><body>
-<h1>Dashboard en Tiempo Real — v8.4.0</h1>
+<h1>Dashboard en Tiempo Real — v8.4.1</h1>
 <div class="grid">
 <div class="card"><div class="lbl">Estado</div><div class="val" id="vEstado">—</div></div>
 <div class="card"><div class="lbl">Servicio</div><div class="val" id="vSvc">—</div></div>
@@ -1959,81 +1962,203 @@ es.onerror=()=>{addLine('SSE desconectado','err');};
 }
 
 # ============================================================================
-# SECCION 29 - v8.1: AUTO-UPDATE GITHUB
+# SECCION 29 - AUTO-UPDATE DESDE EL REPOSITORIO GITHUB
 # ============================================================================
-$script:CurrentVersion = "8.4.0"
+$script:CurrentVersion = "8.4.1"
 $script:CurrentCorrelationId = $null
+$script:LastUpdateCheckError = $null
 
-function Get-LatestGitHubRelease {
+function Get-GitBlobSha1 {
+    param([byte[]]$Bytes)
+    $header = [System.Text.Encoding]::ASCII.GetBytes(("blob {0}`0" -f $Bytes.Length))
+    [byte[]]$blob = $header + $Bytes
+    $sha1 = [System.Security.Cryptography.SHA1]::Create()
     try {
-        # v8.4.0: migrar automaticamente del placeholder antiguo al repo real.
-        if ([string]::IsNullOrEmpty($script:CfgGitHubRepo) -or $script:CfgGitHubRepo -eq "usuario/DefenderTray") {
+        return ([BitConverter]::ToString($sha1.ComputeHash($blob)).Replace("-", "").ToLowerInvariant())
+    } finally { $sha1.Dispose() }
+}
+
+function Get-NormalizedContentSHA256 {
+    param([string]$Text)
+    $normalized = $Text -replace "`r`n", "`n"
+    $normalized = $normalized -replace "`r", "`n"
+    $bytes = [System.Text.Encoding]::UTF8.GetBytes($normalized)
+    $sha256 = [System.Security.Cryptography.SHA256]::Create()
+    try {
+        return ([BitConverter]::ToString($sha256.ComputeHash($bytes)).Replace("-", "").ToLowerInvariant())
+    } finally { $sha256.Dispose() }
+}
+
+function Get-GitHubScriptUpdate {
+    $script:LastUpdateCheckError = $null
+    try {
+        # Migrar el marcador antiguo y validar el destino antes de formar la URL.
+        if ($script:CfgGitHubRepo -eq "usuario/DefenderTray") {
             $script:CfgGitHubRepo = "yhquintero/DefenderTray"
             try { Save-AppConfig } catch { }
         }
-        $url = "https://api.github.com/repos/$($script:CfgGitHubRepo)/releases/latest"
-        $resp = Invoke-RestMethod -Uri $url -Headers @{ "User-Agent" = "DefenderTray" } -TimeoutSec 15
-        return @{
-            Tag = $resp.tag_name; Version = ($resp.tag_name -replace "^v","")
-            Url = $resp.html_url; Assets = $resp.assets
-            Published = $resp.published_at; Body = $resp.body
+        if ([string]::IsNullOrWhiteSpace($script:CfgGitHubRepo)) {
+            $script:LastUpdateCheckError = "Comprobacion de actualizaciones desactivada en Configuracion."
+            return $null
+        }
+        $repo = [string]$script:CfgGitHubRepo
+        if ($repo -notmatch '^[A-Za-z0-9-]{1,39}/[A-Za-z0-9._-]{1,100}$') {
+            throw "El repositorio GitHub debe tener el formato owner/repo."
+        }
+        $repoParts = $repo -split '/', 2
+        $url = "https://api.github.com/repos/$($repoParts[0])/$($repoParts[1])/contents/versiones/8/DefenderTray_8.4_Pro.ps1?ref=main"
+
+        # Windows PowerShell 5.1 puede no usar TLS 1.2 por defecto.
+        try { [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12 } catch { }
+        $headers = @{
+            "User-Agent" = "DefenderTray/$($script:CurrentVersion)"
+            "Accept" = "application/vnd.github+json"
+            "X-GitHub-Api-Version" = "2022-11-28"
+        }
+        $response = Invoke-RestMethod -Uri $url -Method Get -Headers $headers -TimeoutSec 20 -ErrorAction Stop
+        if ($response.type -ne "file" -or $response.path -ne "versiones/8/DefenderTray_8.4_Pro.ps1") {
+            throw "GitHub no devolvio el archivo de DefenderTray esperado."
+        }
+        if ($response.encoding -ne "base64" -or [string]::IsNullOrWhiteSpace([string]$response.content)) {
+            throw "GitHub no devolvio el script en formato base64; no se instalara."
+        }
+        $bytes = [Convert]::FromBase64String(([string]$response.content -replace '\s', ''))
+        $gitSha = Get-GitBlobSha1 -Bytes $bytes
+        if ([string]::IsNullOrWhiteSpace([string]$response.sha) -or
+            $gitSha -ne ([string]$response.sha).ToLowerInvariant()) {
+            throw "La huella Git del archivo descargado no coincide."
+        }
+        $utf8Strict = [System.Text.UTF8Encoding]::new($false, $true)
+        $content = $utf8Strict.GetString($bytes)
+        if ([string]::IsNullOrWhiteSpace($content) -or $content[0] -eq [char]0xFEFF) {
+            throw "El script remoto esta vacio o tiene un BOM no admitido."
+        }
+
+        $tokens = $null; $parseErrors = $null
+        [void][System.Management.Automation.Language.Parser]::ParseInput($content, [ref]$tokens, [ref]$parseErrors)
+        if ($parseErrors -and $parseErrors.Count -gt 0) {
+            $first = $parseErrors[0]
+            throw "El script de GitHub no pasa el parser (linea $($first.Extent.StartLineNumber)): $($first.Message)"
+        }
+        $versionMatch = [regex]::Match($content, '(?m)^\$script:CurrentVersion\s*=\s*"(?<version>\d+(?:\.\d+){1,3})"\s*$')
+        if (-not $versionMatch.Success) { throw "No se encontro una version valida en el script de GitHub." }
+        $version = $versionMatch.Groups["version"].Value
+        $null = [version]$version
+        $sha256 = Get-NormalizedContentSHA256 -Text $content
+        $webUrl = "https://github.com/$repo/blob/main/versiones/8/DefenderTray_8.4_Pro.ps1"
+        return [pscustomobject]@{
+            Tag = "v$version"; Version = $version; Url = $webUrl
+            Assets = @(); Published = $null
+            Body = "Codigo fuente de la rama main. No se requiere publicar un GitHub Release."
+            Source = "GitHub main"; Content = $content; Sha256 = $sha256; GitBlobSha = $gitSha
         }
     } catch {
+        $script:LastUpdateCheckError = $_.Exception.Message
         Write-AppLog "GitHub update check error: $($_.Exception.Message)" "WARN"
         return $null
     }
 }
 
 function Test-UpdateAvailable {
-    $latest = Get-LatestGitHubRelease
+    param($Candidate = $null)
+    $latest = $Candidate
+    if ($null -eq $latest) { $latest = Get-GitHubScriptUpdate }
     if ($null -eq $latest) { return $null }
     try {
-        $cur = [version]$script:CurrentVersion
+        $current = [version]$script:CurrentVersion
         $new = [version]$latest.Version
-        if ($new -gt $cur) { return $latest }
-    } catch { }
+        if ($new -gt $current) { return $latest }
+        if ($new -eq $current -and -not [string]::IsNullOrWhiteSpace([string]$latest.Sha256)) {
+            $localHash = ""
+            if ($script:ScriptPath -and (Test-Path -LiteralPath $script:ScriptPath -PathType Leaf)) {
+                $localText = [System.IO.File]::ReadAllText($script:ScriptPath, [System.Text.Encoding]::UTF8)
+                $localHash = Get-NormalizedContentSHA256 -Text $localText
+            }
+            # Permitir reparar la misma version si el contenido del repositorio cambio.
+            if ($localHash -ne [string]$latest.Sha256) { return $latest }
+        }
+    } catch {
+        $script:LastUpdateCheckError = $_.Exception.Message
+        Write-AppLog "GitHub update comparison error: $($_.Exception.Message)" "WARN"
+    }
     return $null
 }
 
 function Invoke-AutoUpdate {
-    $latest = Test-UpdateAvailable
-    if ($null -eq $latest) { return "Ya tienes la ultima version ($($script:CurrentVersion))" }
+    param($Candidate = $null)
+    $tempPath = $null
     try {
-        $asset = $latest.Assets | Where-Object { $_.name -match '\.(ps1|zip)$' } | Select-Object -First 1
-        if (-not $asset) { return "Release $($latest.Version) no tiene asset descargable" }
-        $dst = Join-Path $script:ConfigDir "updates"
-        if (-not (Test-Path $dst)) { New-Item -Path $dst -ItemType Directory -Force | Out-Null }
-        $dstFile = Join-Path $dst $asset.name
-        Invoke-WebRequest -Uri $asset.browser_download_url -OutFile $dstFile -UseBasicParsing -TimeoutSec 120
-        $shaAsset = $latest.Assets | Where-Object { $_.name -match 'sha256|checksums' } | Select-Object -First 1
-        if ($shaAsset) {
-            $shaTxt = (Invoke-WebRequest -Uri $shaAsset.browser_download_url -UseBasicParsing).Content
-            $expected = ($shaTxt -split "\s+")[0]
-            $actual = (Get-FileHash -Path $dstFile -Algorithm SHA256).Hash
-            if ($actual -ne $expected) { return "SHA256 no coincide. Abortando actualizacion." }
+        $latest = $Candidate
+        if ($null -eq $latest) { $latest = Get-GitHubScriptUpdate }
+        if ($null -eq $latest) {
+            if ($script:LastUpdateCheckError) { return "No se pudo consultar GitHub: $($script:LastUpdateCheckError)" }
+            return "No se pudo obtener el script desde GitHub."
         }
-        $backup = "$($script:ScriptPath).v$($script:CurrentVersion).bak"
-        Copy-Item -Path $script:ScriptPath -Destination $backup -Force
-        if ($dstFile -match '\.zip$') {
-            Expand-Archive -Path $dstFile -DestinationPath (Split-Path $script:ScriptPath) -Force
-        } else {
-            Copy-Item -Path $dstFile -Destination $script:ScriptPath -Force
+        $latest = Test-UpdateAvailable -Candidate $latest
+        if ($null -eq $latest) { return "Ya tienes la ultima version ($($script:CurrentVersion))." }
+        if ([string]::IsNullOrWhiteSpace([string]$latest.Content) -or
+            (Get-NormalizedContentSHA256 -Text $latest.Content) -ne [string]$latest.Sha256) {
+            throw "El contenido descargado no coincide con su SHA256."
         }
-        Add-HistoryDB -Accion "Auto-Update" -Resultado "OK v$($latest.Version)" -Segundos 0
-        return "Actualizado a v$($latest.Version). Reinicia DefenderTray. Backup: $backup"
-    } catch { return "Error: $($_.Exception.Message)" }
+        if ([string]::IsNullOrWhiteSpace($script:ScriptPath)) { throw "No se pudo determinar la ruta del script actual." }
+
+        $targetPath = [System.IO.Path]::GetFullPath($script:ScriptPath)
+        $targetDir = Split-Path -Parent $targetPath
+        if (-not (Test-Path -LiteralPath $targetDir -PathType Container)) { throw "No existe la carpeta del script actual." }
+        $tempName = ".DefenderTray_Update_$($latest.Version)_$([guid]::NewGuid().ToString('N')).ps1"
+        $tempPath = Join-Path $targetDir $tempName
+        $utf8NoBom = [System.Text.UTF8Encoding]::new($false)
+        $normalizedContent = $latest.Content -replace "`r`n", "`n"
+        $normalizedContent = $normalizedContent -replace "`r", "`n"
+        $normalizedContent = $normalizedContent.Replace("`n", "`r`n")
+        [System.IO.File]::WriteAllText($tempPath, $normalizedContent, $utf8NoBom)
+
+        $tokens = $null; $parseErrors = $null
+        [void][System.Management.Automation.Language.Parser]::ParseFile($tempPath, [ref]$tokens, [ref]$parseErrors)
+        if ($parseErrors -and $parseErrors.Count -gt 0) {
+            throw "El archivo temporal no pasa el parser; se cancelo la actualizacion."
+        }
+        $stagedText = [System.IO.File]::ReadAllText($tempPath, [System.Text.Encoding]::UTF8)
+        if ((Get-NormalizedContentSHA256 -Text $stagedText) -ne [string]$latest.Sha256) {
+            throw "La verificacion SHA256 del archivo temporal fallo."
+        }
+
+        $backup = $null
+        if (Test-Path -LiteralPath $targetPath -PathType Leaf) {
+            $stamp = Get-Date -Format "yyyyMMdd-HHmmss"
+            $backup = "$targetPath.v$($script:CurrentVersion).$stamp.bak"
+            if (Test-Path -LiteralPath $backup) { $backup = "$backup.$([guid]::NewGuid().ToString('N'))" }
+            Copy-Item -LiteralPath $targetPath -Destination $backup -Force -ErrorAction Stop | Out-Null
+        }
+        Move-Item -LiteralPath $tempPath -Destination $targetPath -Force -ErrorAction Stop | Out-Null
+        $tempPath = $null
+        try { Add-HistoryDB -Accion "Auto-Update" -Resultado "OK v$($latest.Version)" -Segundos 0 } catch { }
+        $backupText = if ($backup) { " Respaldo: $backup" } else { "" }
+        return "Actualizado a v$($latest.Version) desde GitHub main. Cierra y vuelve a abrir DefenderTray.$backupText"
+    } catch { return "Error al actualizar: $($_.Exception.Message)" }
+    finally {
+        if ($tempPath -and (Test-Path -LiteralPath $tempPath)) {
+            Remove-Item -LiteralPath $tempPath -Force -ErrorAction SilentlyContinue
+        }
+    }
 }
 
 function Show-UpdateDialog {
     $latest = Test-UpdateAvailable
     if ($null -eq $latest) {
-        [System.Windows.Forms.MessageBox]::Show("Ya tienes la ultima version ($($script:CurrentVersion)).","Sin actualizaciones","OK","Information") | Out-Null
+        if ($script:LastUpdateCheckError) {
+            $titulo = if ($script:LastUpdateCheckError -like "Comprobacion de actualizaciones desactivada*") { "Actualizaciones desactivadas" } else { "Error de actualizacion" }
+            $tipo = if ($titulo -eq "Actualizaciones desactivadas") { "Information" } else { "Warning" }
+            [System.Windows.Forms.MessageBox]::Show($script:LastUpdateCheckError, $titulo, "OK", $tipo) | Out-Null
+        } else {
+            [System.Windows.Forms.MessageBox]::Show("Ya tienes la ultima version ($($script:CurrentVersion)).", "Sin actualizaciones", "OK", "Information") | Out-Null
+        }
         return
     }
-    $msg = "Nueva version disponible: v$($latest.Version)`r`nFecha: $($latest.Published)`r`n`r`n$($latest.Body)`r`n`r`n¿Actualizar ahora?"
+    $msg = "Nueva version disponible: v$($latest.Version)`r`nFuente: $($latest.Source)`r`nSHA256 (LF normalizado): $($latest.Sha256)`r`n`r`n$($latest.Body)`r`n`r`n¿Actualizar ahora?"
     if (Show-ConfirmDialog "Actualizacion" $msg) {
-        $res = Invoke-AutoUpdate
-        [System.Windows.Forms.MessageBox]::Show($res,"Auto-Update","OK","Information") | Out-Null
+        $res = Invoke-AutoUpdate -Candidate $latest
+        [System.Windows.Forms.MessageBox]::Show($res, "Auto-Update", "OK", "Information") | Out-Null
     }
 }
 
@@ -2075,7 +2200,7 @@ volumes:
         Set-Content -Path (Join-Path $OutputDir "docker-compose.yml") -Value $compose -Encoding ASCII -Force
 
         $readme = @'
-# DefenderTray v8.4.0 - Docker
+# DefenderTray v8.4.1 - Docker
 Esta imagen NO puede administrar Defender del HOST (contenedores Windows sin acceso al kernel).
 Uso: panel fleet centralizado, API REST, dashboard de monitoreo.
 docker-compose up -d --build
@@ -2131,7 +2256,7 @@ pre { background: #141B2E; padding: 15px; border-radius: 8px; white-space: pre-w
 <h1>$Titulo</h1>
 <pre>$Contenido</pre>
 <div class='footer'>
-Generado por DefenderTray v8.4.0 ULTIMATE<br>
+Generado por DefenderTray v8.4.1 ULTIMATE<br>
 Ing. Yosvany Hernandez Quintero - +53 5 2160801<br>
 Fecha: $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')<br>
 SHA256 del script: $($script:ScriptHash)
@@ -2233,7 +2358,7 @@ function Center-FormOnActiveMonitor {
     } catch { }
 }
 
-# v8.4.0: habilita la tecla Esc y asocia un boton Cancel a un formulario.
+# v8.4.1: habilita la tecla Esc y asocia un boton Cancel a un formulario.
 # Evita repetir el codigo Add_KeyDown en cada dialogo y garantiza que la
 # captura de $dlg en el scriptblock sea la correcta (GetNewClosure).
 function Enable-DialogEscClose {
@@ -2345,7 +2470,7 @@ function Invoke-ToggleProtection {
         Update-TrayIcon -Estado $s2.Estado
 
         $objetivo = if ($accion -eq "Activar") { "ACTIVO" } else { "DESACTIVADO" }
-        # v8.4.0: detectar cambios PARCIALES (tiempo real aplicado pero nube/muestras no)
+        # v8.4.1: detectar cambios PARCIALES (tiempo real aplicado pero nube/muestras no)
         $cloudState = if ($accion -eq "Desactivar") { Confirm-CloudDisabled } else { Confirm-CloudEnabled }
         $msg = "Estado: $($s2.Estado)."
         $parcial = $false
@@ -2687,7 +2812,7 @@ function Repair-DefenderSignatures {
     $endpoints = @("wdcp.microsoft.com","definitionupdates.microsoft.com","www.microsoft.com")
     foreach ($h in $endpoints) {
         $ok = Test-NetConnection -ComputerName $h -InformationLevel Quiet -WarningAction SilentlyContinue -ErrorAction SilentlyContinue
-        if (-not $ok) { [void]$log.Add("[i] Conectividad a $h: FALLA (posible causa de error de actualizacion).") }
+        if (-not $ok) { [void]$log.Add("[i] Conectividad a ${h}: FALLA (posible causa de error de actualizacion).") }
     }
     # Nunca borrar definiciones ni detener el motor: si falla la descarga,
     # las bases existentes siguen disponibles. No cambiar fuentes/intervalos.
@@ -2784,7 +2909,7 @@ function Show-TamperProtectionGuide {
 }
 
 # ============================================================================
-# SECCION 45 - DESACTIVACION COMPLETA NO DESTRUCTIVA (v8.4.0)
+# SECCION 45 - DESACTIVACION COMPLETA NO DESTRUCTIVA (v8.4.1)
 # ============================================================================
 # Desactiva:
 #   - Tiempo real (DisableRealtimeMonitoring)
@@ -2800,7 +2925,7 @@ function Set-DefenderPreferencesBulk {
     # Aplica un hashtable de preferencias una a una con Set-MpPrefValue
     # para que un fallo en una opcion no cancele el resto (splatting por
     # item individual). Devuelve [ok,fail,details] con el detalle de cada
-    # error para poder mostrarlo en el log v8.4.0.
+    # error para poder mostrarlo en el log v8.4.1.
     param([hashtable]$Prefs)
     $ok = 0; $fail = 0
     $details = New-Object System.Collections.ArrayList
@@ -2836,7 +2961,7 @@ function Disable-Defender {
         # Tiempo real (siempre)
         DisableRealtimeMonitoring   = $true
     }
-    # v8.4.0: segun CfgToggleMode, solo RTP o Full (nube + muestras + RTP)
+    # v8.4.1: segun CfgToggleMode, solo RTP o Full (nube + muestras + RTP)
     $fullMode = ($script:CfgToggleMode -ne "RTP")
     if ($fullMode) {
         $prefs["DisableBlockAtFirstSeen"] = $true
@@ -2909,7 +3034,7 @@ function Confirm-CloudEnabled {
 }
 
 # ============================================================================
-# SECCION 45b - BACKUP DE FIRMAS OFFLINE (v8.4.0)
+# SECCION 45b - BACKUP DE FIRMAS OFFLINE (v8.4.1)
 # ============================================================================
 # Copia la carpeta activa de definiciones (Platform/<ver>/Definitions) a un
 # destino elegido por el usuario para poder restaurarlas sin conexion. No usa
@@ -2993,7 +3118,7 @@ Restore    : copy *.vdm to your Definition Updates folder or use MpCmdRun -Signa
 }
 
 # ============================================================================
-# SECCION 45c - TEST DE FIRMA DIGITAL DE MOTOR Y DRIVERS (v8.4.0)
+# SECCION 45c - TEST DE FIRMA DIGITAL DE MOTOR Y DRIVERS (v8.4.1)
 # ============================================================================
 function Test-FileDigitalSignature {
     param([string]$Path)
@@ -3091,7 +3216,7 @@ function Enable-Defender {
             DisableCatchupFullScan                      = $false
             DisableRestorePoint                         = $false
         }
-        # v8.4.0: segun modo de toggle, restaurar tambien nube/muestras o solo RTP.
+        # v8.4.1: segun modo de toggle, restaurar tambien nube/muestras o solo RTP.
         $fullMode = ($script:CfgToggleMode -ne "RTP")
         if ($fullMode) {
             $restorePrefs["DisableBlockAtFirstSeen"] = $false
@@ -3306,7 +3431,7 @@ function Get-DiagnosticReport {
         } catch { }
     }
 
-    # v8.4.0: mostrar estado de Nube y Muestras
+    # v8.4.1: mostrar estado de Nube y Muestras
     [void]$r.Add([PSCustomObject]@{Item="=== NUBE Y MUESTRAS ==="; Status=""; Detail=""; Color=$script:Colors.AccentCyan})
     try {
         $mp = Get-MpPreference -ErrorAction Stop
@@ -3455,7 +3580,7 @@ function Get-DiagnosticReport {
         [void]$r.Add([PSCustomObject]@{Item="  Start $s"; Status=$sv; Detail=""; Color=$c})
     }
 
-    [void]$r.Add([PSCustomObject]@{Item="=== SCRIPT v8.4.0 ==="; Status=""; Detail=""; Color=$script:Colors.AccentCyan})
+    [void]$r.Add([PSCustomObject]@{Item="=== SCRIPT v8.4.1 ==="; Status=""; Detail=""; Color=$script:Colors.AccentCyan})
     [void]$r.Add([PSCustomObject]@{Item="  SHA256"; Status=(Get-ScriptHash); Detail=""; Color=$script:Colors.TextDiag})
     [void]$r.Add([PSCustomObject]@{Item="  Config"; Status="DPAPI"; Detail=$script:ConfigDir; Color=$script:Colors.TextDiag})
     [void]$r.Add([PSCustomObject]@{Item="  REST"; Status=$(if($script:CfgRESTEnabled){"$($script:CfgRESTPort)"}else{"off"}); Detail=$(if($script:UseHTTPS){"HTTPS"}else{"HTTP"}); Color=$script:Colors.TextDiag})
@@ -3500,7 +3625,7 @@ function Show-DiagnosticsDialog {
     $header.BackColor = $script:Colors.AccentAmber
     $dlg.Controls.Add($header)
     $lblH = New-Object System.Windows.Forms.Label
-    $lblH.Text = "DIAGNOSTICO COMPLETO v8.4.0"
+    $lblH.Text = "DIAGNOSTICO COMPLETO v8.4.1"
     $lblH.Font = New-Object System.Drawing.Font("Consolas", 14, [System.Drawing.FontStyle]::Bold)
     $lblH.ForeColor = [System.Drawing.Color]::White
     $lblH.BackColor = [System.Drawing.Color]::Transparent
@@ -3508,8 +3633,8 @@ function Show-DiagnosticsDialog {
     $lblH.Location = New-Object System.Drawing.Point(15, 12)
     $header.Controls.Add($lblH)
 
-    # v8.4.0: panel de botones inferior (Dock=Bottom) para que la ListView no tape botones.
-    # v8.4.0: dos filas de botones (acción arriba, navegación abajo), altura 86.
+    # v8.4.1: panel de botones inferior (Dock=Bottom) para que la ListView no tape botones.
+    # v8.4.1: dos filas de botones (acción arriba, navegación abajo), altura 86.
     $pnlBtns = New-Object System.Windows.Forms.Panel
     $pnlBtns.Dock = "Bottom"; $pnlBtns.Height = 86
     $pnlBtns.BackColor = $script:Colors.Bg
@@ -3558,7 +3683,7 @@ function Show-DiagnosticsDialog {
     $btnRef.Add_Click({ & $cargarDiag })
     $btnCopy.Add_Click({
         $sb = New-Object System.Text.StringBuilder
-        [void]$sb.AppendLine("DIAGNOSTICO - WINDOWS DEFENDER v8.4.0")
+        [void]$sb.AppendLine("DIAGNOSTICO - WINDOWS DEFENDER v8.4.1")
         [void]$sb.AppendLine(("Fecha: {0:yyyy-MM-dd HH:mm:ss}" -f (Get-Date)))
         [void]$sb.AppendLine("=" * 80)
         foreach ($it in $script:DiagLv.Items) {
@@ -3618,7 +3743,7 @@ function Show-EventLogDialog {
     $lblH.Location = New-Object System.Drawing.Point(15, 15)
     $header.Controls.Add($lblH)
 
-    # v8.4.0: area de botones ABAJO (Dock=Bottom) para que la ListView no tape el
+    # v8.4.1: area de botones ABAJO (Dock=Bottom) para que la ListView no tape el
     # boton Cerrar (el bug original). La ListView se ancla Top/Bottom/Left/Right
     # en el espacio restante.
     $pnlBtns = New-Object System.Windows.Forms.Panel
@@ -3663,7 +3788,7 @@ function Show-EventLogDialog {
     }
     & $cargarEventos
 
-    # v8.4.0: usar Add_Click (consistente con el resto de la app) + clausura
+    # v8.4.1: usar Add_Click (consistente con el resto de la app) + clausura
     # correcta via .GetNewClosure() para que $dlg este enlazado en el momento
     # de creacion. Resuelve el bug "Cerrar no hace nada".
     $btnRefrescar.Add_Click($cargarEventos.GetNewClosure())
@@ -3696,7 +3821,7 @@ function Show-HistoryDialog {
     $header.BackColor = $script:Colors.AccentBlue
     $dlg.Controls.Add($header)
     $lblH = New-Object System.Windows.Forms.Label
-    $lblH.Text = "HISTORIAL v8.4.0"
+    $lblH.Text = "HISTORIAL v8.4.1"
     $lblH.Font = New-Object System.Drawing.Font("Consolas", 12, [System.Drawing.FontStyle]::Bold)
     $lblH.ForeColor = [System.Drawing.Color]::White
     $lblH.BackColor = [System.Drawing.Color]::Transparent
@@ -3823,7 +3948,7 @@ function Show-DeepRepairDialog {
     $header.BackColor = $script:Colors.AccentAmber
     $dlg.Controls.Add($header)
     $lblH = New-Object System.Windows.Forms.Label
-    $lblH.Text = "REPARACION PROFUNDA v8.4.0"
+    $lblH.Text = "REPARACION PROFUNDA v8.4.1"
     $lblH.Font = New-Object System.Drawing.Font("Consolas", 14, [System.Drawing.FontStyle]::Bold)
     $lblH.ForeColor = [System.Drawing.Color]::White
     $lblH.BackColor = [System.Drawing.Color]::Transparent
@@ -3880,7 +4005,7 @@ function Show-DeepRepairDialog {
     $btnTodo.Add_Click({
         $c = $script:RepairConsole
         $c.AppendText("==============================================`r`n")
-        $c.AppendText("      REPARACION AUTOMATICA COMPLETA v8.4.0`r`n")
+        $c.AppendText("      REPARACION AUTOMATICA COMPLETA v8.4.1`r`n")
         $c.AppendText("==============================================`r`n")
         $enableLog = Enable-Defender
         $c.AppendText("$enableLog`r`n")
@@ -3895,7 +4020,7 @@ function Show-DeepRepairDialog {
     $btnCert.Add_Click({ Show-CertificateGuide })
     $btnCerr.Add_Click({ $dlg.Close() }.GetNewClosure())
 
-    $console.AppendText("Consola de reparacion v8.4.0 lista.`r`n")
+    $console.AppendText("Consola de reparacion v8.4.1 lista.`r`n")
     Enable-DialogEscClose -Form $dlg -CancelButton $btnCerr
     [void]$dlg.ShowDialog()
     $script:RepairConsole = $null
@@ -4093,11 +4218,11 @@ function Test-KioskPassword {
 }
 
 # ============================================================================
-# SECCION 55 - CONFIGURACION v8.4.0 COMPLETA
+# SECCION 55 - CONFIGURACION v8.4.1 COMPLETA
 # ============================================================================
 function Show-SettingsDialog {
     $dlg = New-Object System.Windows.Forms.Form
-    $dlg.Text = "Configuracion v8.4.0"
+    $dlg.Text = "Configuracion v8.4.1"
     $dlg.ClientSize = New-Object System.Drawing.Size(720, 900)
     $dlg.StartPosition = "CenterScreen"
     $dlg.FormBorderStyle = "Sizable"
@@ -4110,7 +4235,7 @@ function Show-SettingsDialog {
     $header.BackColor = $script:Colors.AccentBlue
     $dlg.Controls.Add($header)
     $lblH = New-Object System.Windows.Forms.Label
-    $lblH.Text = "CONFIGURACION v8.4.0 ULTIMATE"
+    $lblH.Text = "CONFIGURACION v8.4.1 ULTIMATE"
     $lblH.Font = New-Object System.Drawing.Font("Consolas", 12, [System.Drawing.FontStyle]::Bold)
     $lblH.ForeColor = [System.Drawing.Color]::White
     $lblH.BackColor = [System.Drawing.Color]::Transparent
@@ -4214,7 +4339,7 @@ function Show-SettingsDialog {
     # --- GitHub ---
     $txtGitHub = New-FormField $scrollPanel "GitHub Repo (user/repo):" $script:CfgGitHubRepo ([ref]$y)
 
-    # --- v8.4.0: Modo de toggle avanzado ---
+    # --- v8.4.1: Modo de toggle avanzado ---
     $lblToggleMode = New-Object System.Windows.Forms.Label
     $lblToggleMode.Text = "Modo Activar/Desactivar:"; $lblToggleMode.ForeColor = $script:Colors.Text
     $lblToggleMode.Location = New-Object System.Drawing.Point(20, $y); $lblToggleMode.Size = New-Object System.Drawing.Size(200, 25)
@@ -4324,7 +4449,7 @@ function Show-SettingsDialog {
         }
     })
     $btnTestTelegram.Add_Click({
-        $ok = Send-TelegramNotification "Test desde DefenderTray v8.4.0"
+        $ok = Send-TelegramNotification "Test desde DefenderTray v8.4.1"
         if ($ok) { [System.Windows.Forms.MessageBox]::Show("Enviado.","OK","OK","Information") | Out-Null }
         else { [System.Windows.Forms.MessageBox]::Show("Fallo. Revisa token y chat id.","Error","OK","Error") | Out-Null }
     })
@@ -4416,7 +4541,7 @@ function Show-HelpDialog {
     $header.BackColor = $script:Colors.AccentBlue
     $dlg.Controls.Add($header)
     $lblH = New-Object System.Windows.Forms.Label
-    $lblH.Text = "AYUDA - v8.4.0 ULTIMATE"
+    $lblH.Text = "AYUDA - v8.4.1 ULTIMATE"
     $lblH.Font = New-Object System.Drawing.Font("Consolas", 13, [System.Drawing.FontStyle]::Bold)
     $lblH.ForeColor = [System.Drawing.Color]::White
     $lblH.BackColor = [System.Drawing.Color]::Transparent
@@ -4434,10 +4559,10 @@ function Show-HelpDialog {
     $txt.Font = New-Object System.Drawing.Font("Consolas", 9)
     $txt.Anchor = "Top,Left,Right,Bottom"
     $txt.Text = (Normalize-LineEndings @'
-DEFENDER CONTROL v8.4.0 ULTIMATE
+DEFENDER CONTROL v8.4.1 ULTIMATE
 ================================
 
-NOVEDADES v8.4.0
+NOVEDADES v8.4.1
 --------------
  1. ACTIVAR y DESACTIVAR adyacentes, segun estado y operacion en curso
  2. Desactivar pausa tiempo real sin cerrar el motor ni el actualizador
@@ -4480,9 +4605,16 @@ EJEMPLO GRAPHQL
 
 AUTO-UPDATE
 -----------
-1. Sube el script a GitHub Releases (tag v8.4.0)
-2. Añade asset .ps1 + .sha256 (opcional)
-3. Settings -> Buscar Update
+1. Buscar Actualizacion consulta el archivo de versiones/8 en la rama main de GitHub
+2. No se requiere GitHub Release; el cambio se valida antes de reemplazar el script
+3. Se crea un .bak junto al archivo actual; reinicia DefenderTray despues
+
+RECUPERAR UN SCRIPT QUE NO ARRANCA
+---------------------------------
+Un ParserError impide que PowerShell ejecute el auto-update integrado.
+Descarga versiones/8/Reparar-DefenderTray.ps1 desde GitHub y ejecutalo aparte:
+  powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\Reparar-DefenderTray.ps1 -TargetPath C:\DefenderTray_8.4_Pro.ps1
+El recuperador verifica SHA, sintaxis y crea un respaldo antes de sustituir.
 
 DOCKER
 ------
@@ -5083,7 +5215,7 @@ function Show-DefenderPanel {
 }
 
 # ============================================================================
-# SECCION 59 - REST API v8.4.0 COMPLETA
+# SECCION 59 - REST API v8.4.1 COMPLETA
 # ============================================================================
 $script:RESTJob = $null
 
@@ -5381,7 +5513,7 @@ function Start-ThresholdMonitor {
 }
 
 # ============================================================================
-# SECCION 62 - ARRANQUE v8.4.0
+# SECCION 62 - ARRANQUE v8.4.1
 # ============================================================================
 Get-ScriptHash | Out-Null
 Write-AppLog "=============================================" "INFO"
