@@ -16,7 +16,7 @@
 [![Licencia](https://img.shields.io/badge/licencia-propietaria-475569?style=flat-square)](LICENSE)
 [![Seguridad](https://img.shields.io/badge/seguridad-pol%C3%ADtica%20publicada-FF3366?style=flat-square)](SECURITY.md)
 
-[Requisitos](#-requisitos) · [Inicio rápido](#-inicio-rápido) · [Qué hace](#-qué-hace-cada-acción) · [Argumentos](#-argumentos-de-línea-de-comandos) · [API local](#-api-local) · [Configuración](#-configuración-y-datos) · [Solución de problemas](#-solución-de-problemas) · [FAQ](#-preguntas-frecuentes) · [Seguridad](#-seguridad) · [Licencia](#-licencia)
+[Requisitos](#-requisitos) · [Inicio rápido](#-inicio-rápido) · [Qué hace](#-qué-hace-cada-acción) · [Argumentos](#-argumentos-de-línea-de-comandos) · [API local](#-api-local) · [Configuración](#-configuración-y-datos) · [Solución de problemas](#-solución-de-problemas) · [FAQ](#-preguntas-frecuentes) · [Seguridad](#-seguridad) · [Licencia](#-licencia) · [Historial](CHANGELOG.md)
 
 </div>
 
@@ -48,7 +48,7 @@ A partir de la rama 8.x el proyecto dejó de ser un simple *toggle* y añade una
 | 🌐 **API local** | `HttpListener` en `127.0.0.1:9182` con REST, un subconjunto GraphQL, `SSE` para el panel en vivo, consola Fleet y PWA instalable. HTTP o HTTPS con certificado autofirmado. |
 | 🔔 **Notificaciones** | Telegram Bot, Firebase Cloud Messaging (FCM v1), correo SMTP, webhooks JSON propios y alerta umbral («Defender lleva X horas desactivado»). |
 | 🏢 **Capa empresarial** | Inventario de Active Directory, firma Authenticode de reportes y guía de certificado EV, generador de instalador MSI (WiX), `Dockerfile`/`docker-compose` para la consola, modo auditoría, modo forense y autoactualización desde GitHub Releases con verificación SHA256. |
-| 📚 **Histórico de versiones** | 37 scripts PowerShell desde la v1 hasta la v8.1 en [`versiones/`](versiones/) — el changelog real del proyecto, diff en mano. |
+| 📚 **Histórico de versiones** | 37 scripts PowerShell desde la v1 hasta la v8.1, indexados uno a uno en [`versiones/README.md`](versiones/README.md) y narrados en el [registro de cambios](CHANGELOG.md). |
 
 ## ✨ Funciones destacadas
 
@@ -202,7 +202,21 @@ El código vive en [`versiones/`](versiones/), una carpeta por hito. Esta es la 
 | 3.x | [`versiones/3/`](versiones/3/) | Ayuda contextual, tooltips, asistente de primera ejecución, autoinicio, atajos, tema y colores. |
 | 1 – 2 | [`versiones/1/`](versiones/1/) · [`versiones/2/`](versiones/2/) | El tray original con menú y modal de colores. |
 
-⭐ = usa esta. Las demás se conservan como referencia histórica y para entornos antiguos; **no reciben correcciones** (ver [SECURITY.md](SECURITY.md#-versiones-con-soporte)).
+⭐ = usa esta. Las demás se conservan como referencia histórica y para entornos antiguos; **no reciben correcciones** (ver [SECURITY.md](SECURITY.md#-versiones-con-soporte)). El índice archivo por archivo —líneas, bytes, estado y qué declara cada cabecera— está en [`versiones/README.md`](versiones/README.md), y el detalle completo, en [CHANGELOG.md](CHANGELOG.md).
+
+## 📚 Documentación del repositorio
+
+| Documento | Qué contiene |
+|---|---|
+| [README.md](README.md) | Lo que estás leyendo: uso, argumentos, API, configuración y diagnóstico. |
+| [CHANGELOG.md](CHANGELOG.md) | Historial reconstruido de las cabeceras de cada script, más la lista de limpieza pendiente. |
+| [CONTRIBUTING.md](CONTRIBUTING.md) | Entorno, banco de pruebas en VM, estilo del proyecto, reglas de versionado y revisión sensible. |
+| [SECURITY.md](SECURITY.md) | Reporte privado, alcance, modelo de amenazas, 14 límites conocidos con su mitigación y endurecimiento. |
+| [LICENSE](LICENSE) | Licencia propietaria bilingüe (español prevalece), con la cláusula de uso responsable. |
+| [`versiones/README.md`](versiones/README.md) | Índice del histórico: 37 `.ps1` con tamaño, estado y una línea de contexto. |
+| [`.github/workflows/ci.yml`](.github/workflows/ci.yml) | Comprobaciones: sintaxis (bloqueante en la v8), codificación y CRLF, PSScriptAnalyzer y enlaces de la documentación. |
+| [`.github/ISSUE_TEMPLATE/`](.github/ISSUE_TEMPLATE/) · [`.github/PULL_REQUEST_TEMPLATE.md`](.github/PULL_REQUEST_TEMPLATE.md) | Plantillas de informe de error, propuesta de mejora y pull request. |
+| [`.gitignore`](.gitignore) · [`.gitattributes`](.gitattributes) | Qué queda fuera del repositorio y por qué los `.ps1` viajan con CRLF. |
 
 ## 🩺 Solución de problemas
 
@@ -242,10 +256,18 @@ versiones/
   6/  DefenderTray_6.0_Pro.ps1                 API REST, DPAPI, Windows Server, -audit
   7/  DefenderTray_7.0_Pro.ps1                 Panel web, Telegram, modo forense y tutela
   8/  DefenderTray_8.0_Pro.ps1, 8.1_Pro.ps1    Capa «enterprise» (la recomendada)
-README.md · CONTRIBUTING.md · LICENSE · SECURITY.md
+  README.md                                    Índice del histórico y reglas de la carpeta
+
+CHANGELOG.md · README.md · CONTRIBUTING.md · LICENSE · SECURITY.md
+.github/
+  workflows/ci.yml                             Sintaxis, codificación, análisis y enlaces
+  ISSUE_TEMPLATE/bug_report.yml · feature_request.yml · config.yml
+  PULL_REQUEST_TEMPLATE.md · dependabot.yml
+  check_markdown_links.py                      El comprobador que usa el job «docs»
+.gitattributes · .gitignore
 ```
 
-Es un repositorio de **un solo archivo ejecutable por versión**: no hay árbol `src/`, ni compilación, ni gestores de paquetes. Cada `.ps1` es autónomo y autocontenido (65 secciones y 134 funciones en la v8.1), lo que facilita copiarlo a un equipo aislado y lo que hace que el tamaño llame la atención. Los archivos con sufijos `.backup_*`, `- copia - copia` y el marcador `revisar` son residuos del desarrollo histórico: no los uses como referencia, toma siempre la v8.1.
+Es un repositorio de **un solo archivo ejecutable por versión**: no hay árbol `src/`, ni compilación, ni gestores de paquetes. Cada `.ps1` es autónomo y autocontenido (65 secciones y 134 funciones en la v8.1), lo que facilita copiarlo a un equipo aislado y lo que hace que el tamaño llame la atención. Los archivos con sufijos `.backup_*`, `- copia - copia` y el marcador `revisar` son residuos del desarrollo histórico: no los uses como referencia, toma siempre la v8.1. Se listan y explican en [CHANGELOG.md](CHANGELOG.md#-pendientes-de-limpieza-registrados), y [`.gitignore`](.gitignore) ya impide que se generen otros nuevos.
 
 ## ❓ Preguntas frecuentes
 
@@ -321,9 +343,13 @@ No asumas que sí: un script que manipula las claves de políticas de Defender e
 
 </details>
 
+## 📝 Registro de cambios
+
+El historial completo, versión a versión y con las mejoras que declara cada script, está en [CHANGELOG.md](CHANGELOG.md); ahí se explica también por qué la 8.1 es una revisión de texto de la 8.0 y qué queda pendiente de limpieza en `versiones/`. Cuando existan etiquetas y releases, cada entrada ganará su fecha.
+
 ## 🤝 Contribuir
 
-Informes de error, propuestas de mejora, correcciones de documentación y pull requests son bienvenidos. La guía está en [CONTRIBUTING.md](CONTRIBUTING.md): cómo montar el entorno, **cómo probar sin tumbar tu Windows** (máquina virtual + `-audit`), el estilo de PowerShell del proyecto, el esquema de versiones y las reglas para los cambios que tocan la desactivación de la protección, que reciben una revisión extra por ser duales.
+Informes de error, propuestas de mejora, correcciones de documentación y pull requests son bienvenidos, con las plantillas de `.github/`. La guía está en [CONTRIBUTING.md](CONTRIBUTING.md): cómo montar el entorno, **cómo probar sin tumbar tu Windows** (máquina virtual + `-audit`), el estilo de PowerShell del proyecto, el esquema de versiones y las reglas para los cambios que tocan la desactivación de la protección, que reciben una revisión extra por ser duales.
 
 ## 📄 Licencia
 
@@ -367,7 +393,7 @@ On Windows 11, turn **Tamper Protection** off first: while it is on, the disable
 
 **Privacy.** Nothing leaves the machine unless you configure Telegram, Firebase Cloud Messaging, SMTP, webhooks or the GitHub update check. Settings are stored DPAPI-encrypted (current user) in `%LOCALAPPDATA%\DefenderTray\config.dat`; forensic screenshots are **not** encrypted.
 
-**Status of features.** v8.1 is the reference build. Note that v8.1 differs from v8.0 only in version strings, that multi-machine fleet support is a local skeleton rather than a central server, and that voice control is a stub. Read [SECURITY.md](SECURITY.md) for the honest list of known limits and mitigations, [CONTRIBUTING.md](CONTRIBUTING.md) for conventions and safe testing, and [LICENSE](LICENSE) for terms.
+**Status of features.** v8.1 is the reference build. Note that v8.1 differs from v8.0 only in version strings, that multi-machine fleet support is a local skeleton rather than a central server, and that voice control is a stub. Read [SECURITY.md](SECURITY.md) for the honest list of known limits and mitigations, [CONTRIBUTING.md](CONTRIBUTING.md) for conventions and safe testing, [CHANGELOG.md](CHANGELOG.md) for the version history, and [LICENSE](LICENSE) for terms. Continuous integration (`.github/workflows/ci.yml`) checks PowerShell syntax, file encoding and documentation links without ever running the tool.
 
 ---
 

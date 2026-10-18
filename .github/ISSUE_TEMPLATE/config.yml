@@ -1,0 +1,11 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Reportar una vulnerabilidad (canal privado)
+    url: https://github.com/yhquintero/DefenderTray/security/advisories/new
+    about: Nunca abras un issue público para un problema de seguridad; usa el reporte privado de GitHub.
+  - name: Política y límites de seguridad
+    url: https://github.com/yhquintero/DefenderTray/blob/main/SECURITY.md
+    about: Riesgos conocidos de v8.1, mitigaciones y recomendaciones de endurecimiento antes de preguntar.
+  - name: Cómo contribuir
+    url: https://github.com/yhquintero/DefenderTray/blob/main/CONTRIBUTING.md
+    about: Entorno, banco de pruebas en máquina virtual, estilo del proyecto y cambios sensibles.

@@ -12,10 +12,10 @@
 
 ## 🧭 Formas de contribuir
 
-- 🐞 **Informar de un error** — abre un [issue](https://github.com/yhquintero/DefenderTray/issues) con versión, SHA256 del `.ps1`, build de Windows, argumentos usados y el fragmento de log correspondiente.
-- ✨ **Proponer una mejora** — explica primero **qué problema resuelve** y durante cuánto tiempo necesitas el estado desactivado; si no hay contexto de uso, primero se pedirá: una propuesta sin problema descrito no se puede valorar.
+- 🐞 **Informar de un error** — usa la plantilla [Informe de error](https://github.com/yhquintero/DefenderTray/issues/new?template=bug_report.yml): pide versión, SHA256 del `.ps1`, build de Windows, línea de comandos y el fragmento de log. Varios campos son obligatorios a propósito, porque sin ellos no se reproduce nada.
+- ✨ **Proponer una mejora** — con la plantilla [Propuesta de mejora](https://github.com/yhquintero/DefenderTray/issues/new?template=feature_request.yml), que empieza por el **problema** y sigue por el riesgo y la reversión; una propuesta sin problema descrito no se puede valorar.
 - 🩺 **Casos de reparación** — los errores de firmas, servicios que reviven o `Start=4` que no se sostiene son el mejor regalo: describe el build, qué hiciste antes y qué dijo el diagnóstico.
-- 📚 **Documentación** — README, esta guía y [SECURITY.md](SECURITY.md) se aceptan solos; si corriges una descripción técnica equivocada, mejor aún.
+- 📚 **Documentación** — [README.md](README.md), [CHANGELOG.md](CHANGELOG.md), esta guía y [SECURITY.md](SECURITY.md) se aceptan encantados; corregir una afirmación técnica equivocada de las que evitan un susto, mejor aún.
 - 🌍 **Idiomas** — añadir o pulir claves de la tabla ES/EN del script.
 - 🔒 **Vulnerabilidades** — **nunca** en público: usa el reporte privado descrito en [SECURITY.md](SECURITY.md#-cómo-reportar-una-vulnerabilidad).
 
@@ -24,8 +24,9 @@
 - Busca si ya existe un issue o un pull request sobre lo mismo.
 - Para cambios grandes (una sección nueva, otro proveedor de datos, otra forma de persistencia, tocar la secuencia de 10 pasos), abre antes un issue y acordemos el enfoque: aquí el coste de equivocarse es una máquina sin protección.
 - **Un pull request = un cambio.** «Arreglo del puerto + refactor de colores + i18n» se cierra y se pide separar.
+- Si añades, renombras o quitas un archivo de `versiones/`, actualiza la tabla de índice de [`versiones/README.md`](versiones/README.md) y el [CHANGELOG.md](CHANGELOG.md): ese par es lo primero que lee quien llega sin contexto.
 - Cambia **la versión actual** (`versiones/8/DefenderTray_8.1_Pro.ps1`), no las carpetas históricas: 1.x–7.x son archivo, no destino.
-- No toques `versiones/4/DefenderTray_4.1.ps1.backup_*.bak`, `DefenderTray_4.3.1_Pro - copia - copia.ps1` ni `versiones/revisar`: son residuos del desarrollo. Si quieres proponer limpiarlos, abre un issue aparte.
+- No toques `versiones/4/DefenderTray_4.1.ps1.backup_*.bak`, `DefenderTray_4.3.1_Pro - copia - copia.ps1` ni `versiones/revisar`: son residuos catalogados en [CHANGELOG.md](CHANGELOG.md#-pendientes-de-limpieza-registrados). Si quieres proponer limpiarlos, hazlo en un pull request propio y sin tocar nada más.
 
 ## 🔨 Preparar el entorno
 
@@ -84,6 +85,21 @@ Ejecuta las filas relacionadas con tu cambio y pégalas en la descripción del p
 | Degradación | Renombra `lib\System.Data.SQLite.dll` y arranca | Aviso en el log y funcionamiento sobre JSON: **nada de cierres**. |
 | Sin permisos | Ejecuta como usuario estándar | Diagnóstico disponible; las acciones explican por qué no aplican. |
 
+## ✅ Comprobaciones automáticas
+
+Estas son las mismas que ejecuta la [integración continua](.github/workflows/ci.yml); conviene correrlas antes de abrir el pull request:
+
+| Comprobación | Cómo se ejecuta | Corte |
+|---|---|:--:|
+| Sintaxis de la versión actual | `Parser::ParseFile` sobre `versiones/8/*.ps1` (bloque del [entorno](#-preparar-el-entorno)) | ✅ bloquea |
+| Sintaxis del histórico | lo mismo sobre el resto de `versiones/` | ⚠️ informativo: hay archivos antiguos sin soporte que no parsean |
+| Codificación | sin BOM y sin líneas LF sueltas en todos los `.ps1` | ✅ bloquea |
+| Literales ASCII | avisa de caracteres fuera del ASCII, que PowerShell 5.1 lee como ANSI | ⚠️ informativo |
+| Análisis estático | `Invoke-ScriptAnalyzer -Path versiones\8 -Recurse -Severity Warning,Error` | ⚠️ informativo |
+| Enlaces y anclas | `python .github/check_markdown_links.py` | ✅ bloquea |
+
+El comprobador de documentación es de propósito general: si mueves o renombras un archivo y dejas un enlace roto, te dice la ruta y la línea.
+
 ## 📐 Estilo y convenciones
 
 - **Un solo archivo, y que lo siga siendo.** No dividas en módulos ni en `lib/`: el requisito que sostiene el proyecto es «cópialo en una USB y arráncalo en un equipo recién formateado».
@@ -99,6 +115,7 @@ Ejecuta las filas relacionadas con tu cambio y pégalas en la descripción del p
   - Los fallos se degradan con `-ErrorAction SilentlyContinue` + aviso, **nunca** con un `throw` que deje el equipo a medias.
 - **Sin dependencias nuevas obligatorias.** Detecta y degrada: `if (Get-Command X -ErrorAction SilentlyContinue) { … } else { … }` (así funcionan `ImportExcel`, `ActiveDirectory` y SQLite).
 - **Sin llamadas de red nuevas** ni canales de salida sin acordarlo antes en un issue: son superficie de fuga y entran en la revisión sensible.
+- **Codificación y finales de línea resueltos por [`.gitattributes`](.gitattributes)**: los `.ps1` se checkean con CRLF y los documentos con LF, así que no toques `core.autocrlf` ni conviertas archivos «para que se vean bien»; la comprobación de formato lo vigila.
 - **Codificación y finales de línea:** guarda los `.ps1` en **UTF-8 sin BOM** y **CRLF** (igual que los del repositorio). PowerShell 5.1 lee sin BOM como ANSI, así que la combinación segura es: BOM ausente + literal ASCII. Compruébalo antes de commitear:
 
   ```powershell
@@ -164,19 +181,19 @@ Nunca subas al repositorio:
 - tokens de bot de Telegram, JSON de cuenta de servicio de Firebase, credenciales SMTP, URLs de webhooks, `CfgGitHubRepo` de una organización;
 - capturas del diálogo de Configuración o del panel en equipos productivos: oscurece nombres de equipo y usuario.
 
-Para pruebas usa datos inventados (`DEFENDER-TEST`, `127.0.0.1`, `bot123:AAAA-demo`). Si necesitas adjuntar un log, recorta las líneas con rutas de usuario. Si propones añadir un `.gitignore`, hazlo en un pull request propio y con las carpetas reales del proyecto.
+Para pruebas usa datos inventados (`DEFENDER-TEST`, `127.0.0.1`, `bot123:AAAA-demo`). Si necesitas adjuntar un log, recorta las líneas con rutas de usuario. El [`.gitignore`](.gitignore) ya deja fuera `config.dat`, la base de datos, `Logs/`, `Auditoria/`, `Forense/`, `Backups/`, `DefenderTrayData/`, los `*.reg`, los `*.bak` y los `* - copia*`; si tu herramienta genera otro artefacto local, añade el patrón en el mismo pull request.
 
 ## 📝 Commits y pull requests
 
 1. Crea una rama desde `main` con nombre descriptivo: `fix/puerto-en-uso`, `feat/exportar-fleet-csv`.
 2. Mensajes en español con [Conventional Commits](https://www.conventionalcommits.org/es/v1.0.0/) y ámbito: `fix(defender):`, `feat(api):`, `docs(security):`, `test:`, `refactor(sqlite):`, `chore:`. Ejemplo: `fix(api): validar action en /fleet/command antes de armar la línea de comandos`.
 3. Un commit lógico por cambio; nada de «copia», «final v2», «backup» ni «ahora sí». Los archivos `.bak` y `- copia` del repo vienen del desarrollo histórico, no son un precedente.
-4. El **changelog de facto** es el bloque `<# Novedades vX #>` de la cabecera: añade ahí tu línea, con numeración continua.
+4. Añade tu línea al bloque `<# Novedades vX #>` de la cabecera **y** al [CHANGELOG.md](CHANGELOG.md), que se construye a partir de él; si tu cambio todavía no pertenece a una versión publicada, va en `[Sin publicar]`.
 5. Actualiza la documentación afectada en el mismo pull request: [README.md](README.md) (funciones, argumentos, API, tabla de versiones), [SECURITY.md](SECURITY.md) (límites y mitigaciones si cambias el modelo de amenazas) y la Ayuda del script. Un pull request que añade una opción sin documentarla se devuelve.
 6. Pega la matriz de [comprobaciones manuales](#matriz-de-comprobaciones-manuales) con los ✅, y adjunta capturas si cambia la interfaz.
 7. Sin errores del parser; `Invoke-ScriptAnalyzer` sin avisos nuevos atribuibles a tu cambio.
 
-**Plantilla mínima del pull request** (no hay plantillas en `.github/`, escríbela a mano):
+Al abrir el pull request se rellena sola la [plantilla](.github/PULL_REQUEST_TEMPLATE.md); si lo abres sin ella, copia estas secciones a mano:
 
 ```markdown
 ### Qué cambia y por qué
@@ -218,7 +235,7 @@ Thank you for your interest in improving DefenderTray! This guide covers how to 
 
 ### 🧭 Ways to contribute
 
-🐞 Bug reports (version, script SHA256, Windows build, arguments, log excerpt) · ✨ improvement proposals that state the problem they solve and how long protection must stay off · 🩺 real-world repair cases (signature errors, services revived by Windows, `Start=4` not holding) · 📚 documentation · 🌍 ES/EN string tables · 🔒 vulnerabilities **only** via private reporting.
+🐞 Bug reports through the "Informe de error" issue form (version, script SHA256, Windows build, command line, log excerpt) · ✨ improvement proposals that state the problem they solve and how long protection must stay off · 🩺 real-world repair cases (signature errors, services revived by Windows, `Start=4` not holding) · 📚 documentation · 🌍 ES/EN string tables · 🔒 vulnerabilities **only** via private reporting.
 
 ### ✅ Before you start
 
@@ -234,6 +251,10 @@ $errs = $null; $toks = $null
 $errs | ForEach-Object { "{0}: {1}" -f $_.Extent.StartLineNumber, $_.Message }
 ```
 
+### ✅ Automated checks
+
+The same ones [continuous integration](.github/workflows/ci.yml) runs: `Parser::ParseFile` on `versiones/8/*.ps1` (blocking), the same parse for the historical folder (advisory, since unsupported legacy files may not parse), an encoding check for no BOM and no bare LF in every `.ps1` (blocking), non-ASCII literal warnings, `Invoke-ScriptAnalyzer -Path versiones\8 -Recurse -Severity Warning,Error` (advisory) and `python .github/check_markdown_links.py` for broken links and anchors (blocking).
+
 ### 🧪 Testing protocol
 
 Snapshot → export the registry keys the tool may delete → run `-audit` and confirm nothing was applied → `disable`, check `Get-MpComputerStatus`, reboot, check again → `enable` and verify Tamper Protection and `RealTimeProtectionEnabled` → break something on purpose and run Deep Repair → remove the Defender exclusion, unregister `DefenderTray_*` tasks, delete the self-signed HTTPS certificate, revert the snapshot. Paste the manual matrix (with ✅/❌) from the Spanish section into your pull request, covering only the rows your change touches: tray colour, dialogs and shortcuts, i18n toggle, audit mode, local API endpoints, portable vs. per-user data paths, history export, `.reg` backups, graceful SQLite degradation, and non-admin behaviour.
@@ -247,7 +268,7 @@ Snapshot → export the registry keys the tool may delete → run `-audit` and c
 - No hardcoded user-visible strings: `T "Key"` with entries in **both** ES and EN tables; non-ASCII characters built from codes (`[char]0x00F1`); run multiline text through `Normalize-LineEndings`.
 - Security rules that are mandatory in code: every mutating function starts with the `if ($script:AuditMode) { … return }` guard; back up the registry before the first destructive step; log every step with `Write-AppLog` and record it with `Add-HistoryDB`; degrade with `-ErrorAction SilentlyContinue` plus a warning instead of throwing mid-change.
 - No new mandatory dependencies (`Get-Command` probe, then fall back), no new outbound network calls without an issue first.
-- Save `.ps1` files as **UTF-8 without BOM, CRLF**, keep literals ASCII (PowerShell 5.1 decodes non-BOM as ANSI), and verify before committing.
+- Save `.ps1` files as **UTF-8 without BOM, CRLF** and keep literals ASCII (PowerShell 5.1 decodes non-BOM as ANSI); [`.gitattributes`](.gitattributes) already pins the line endings on checkout, so do not re-convert files or tweak `core.autocrlf`. Verify with the encoding check before committing.
 
 ### 🚀 Bumping a version
 
@@ -259,7 +280,7 @@ Never commit `config.dat`, `defendertray.db`, `historial.json`, `profiles.json`,
 
 ### 📝 Commits and pull requests
 
-Branch from `main` (`fix/port-in-use`), Spanish [Conventional Commits](https://www.conventionalcommits.org/en/v1.0.0/) with a scope (`fix(api):`, `feat(defender):`, `docs(security):`, `refactor(sqlite):`), one logical change per commit, no "copia/final v2/backup" filenames, your line added to the header `Novedades` block (that is the project's changelog), documentation updated in the same pull request, the manual matrix pasted with ✅, and a clean parser run. Since there are no `.github/` templates, write the PR body by hand: what changed and why · how it was tested · security risk · how to revert on an already-touched machine · docs updated.
+Branch from `main` (`fix/port-in-use`), Spanish [Conventional Commits](https://www.conventionalcommits.org/en/v1.0.0/) with a scope (`fix(api):`, `feat(defender):`, `docs(security):`, `refactor(sqlite):`), one logical change per commit, no "copia/final v2/backup" filenames, your line added to both the header `Novedades` block and [CHANGELOG.md](CHANGELOG.md), documentation updated in the same pull request, the manual matrix pasted with ✅, and a clean parser run. The [pull request template](.github/PULL_REQUEST_TEMPLATE.md) is applied automatically; without it, write these sections by hand: what changed and why · how it was tested · security risk · how to revert on an already-touched machine · docs updated.
 
 ### 🚫 What will not be accepted
 

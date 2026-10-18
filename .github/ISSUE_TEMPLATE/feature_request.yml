@@ -1,0 +1,63 @@
+name: Propuesta de mejora
+description: Una función nueva, un cambio de comportamiento o una mejora de documentación.
+title: "[feat] "
+labels:
+  - enhancement
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Este proyecto desactiva y reactiva el antivirus: cada propuesta se lee dos veces.
+        Cuenta primero **el problema** y después la solución; sin problema descrito, no se puede valorar.
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problema que resuelve
+      description: Qué te impide hacer hoy, en qué Windows y con qué versión del script.
+      placeholder: "Necesito desactivar Defender 10 minutos para instalar X y no puedo verificar que quedó activado."
+    validations:
+      required: true
+  - type: textarea
+    id: solution
+    attributes:
+      label: Solución propuesta
+      description: Función, botón, argumento o cambio de secuencia. Sé concreto.
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternativas consideradas
+      description: Qué otra cosa podría servir y por qué la descartas.
+  - type: dropdown
+    id: area
+    attributes:
+      label: Área afectada
+      multiple: true
+      options:
+        - Tray y notificaciones
+        - Panel y diálogos
+        - Activar / Desactivar Defender
+        - Diagnóstico y reparación
+        - Historial y exportación
+        - API local (REST, GraphQL, SSE, PWA)
+        - Configuración y almacenamiento
+        - Notificaciones (Telegram, FCM, SMTP, webhooks)
+        - Instalación, servicio y programador
+        - Documentación
+  - type: textarea
+    id: risk
+    attributes:
+      label: Riesgo y reversión
+      description: |
+        ¿Puede dejar un equipo desprotegido o guardar algo sensible? ¿Cómo se vuelve atrás?
+        Si no aplica, escribe «no aplica».
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Confirmaciones
+      options:
+        - label: No propone ofuscar, ocultar ni alargar la desprotección de un equipo.
+          required: true
+        - label: Acepto las condiciones de contribución de CONTRIBUTING.md y de la licencia.
+          required: true

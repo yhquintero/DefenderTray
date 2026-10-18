@@ -1,0 +1,110 @@
+name: Informe de error
+description: Algo no funciona como se espera en la versión actual del script.
+title: "[bug] "
+labels:
+  - bug
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Gracias por reportar. Rellena lo que sepas: sin versión y sin log, el error no se puede reproducir.
+        **Si es una vulnerabilidad, no uses este formulario**: abre un reporte privado según
+        [SECURITY.md](https://github.com/yhquintero/DefenderTray/blob/main/SECURITY.md).
+  - type: dropdown
+    id: version
+    attributes:
+      label: Versión usada
+      description: Solo las de `versiones/8/` reciben correcciones.
+      options:
+        - 8.1 ULTIMATE (actual)
+        - 8.0 ULTIMATE
+        - 7.0 o anterior
+      default: 0
+    validations:
+      required: true
+  - type: input
+    id: sha
+    attributes:
+      label: SHA256 del script
+      description: Salidas de `Get-FileHash .\DefenderTray_8.1_Pro.ps1 -Algorithm SHA256`.
+      placeholder: 27e31b22…
+    validations:
+      required: true
+  - type: dropdown
+    id: os
+    attributes:
+      label: Sistema operativo
+      options:
+        - Windows 11
+        - Windows 10
+        - Windows Server 2019/2022
+        - Windows 8.1 o anterior
+      default: 0
+    validations:
+      required: true
+  - type: dropdown
+    id: ps
+    attributes:
+      label: Intérprete
+      options:
+        - Windows PowerShell 5.1
+        - PowerShell 7.x
+      default: 0
+    validations:
+      required: true
+  - type: textarea
+    id: args
+    attributes:
+      label: Línea de comandos y opciones activas
+      description: |
+        Qué argumentos usaste (`-silent`, `-audit`, `-portable`, `-norest`, `-https`, `-action …`)
+        y qué casillas tienen activadas en Configuración (API REST, kiosco, forense, nube, notificaciones).
+      render: text
+      placeholder: powershell -NoProfile -ExecutionPolicy Bypass -File .\DefenderTray_8.1_Pro.ps1
+    validations:
+      required: true
+  - type: textarea
+    id: repro
+    attributes:
+      label: Pasos para reproducir
+      value: |
+        1. …
+        2. …
+        3. …
+      placeholder: Describe el estado previo del equipo (GPO, Tamper Protection, AV de terceros).
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Qué esperabas y qué ocurrió
+      description: Incluye el resultado del diagnóstico o del diálogo de acción.
+    validations:
+      required: true
+  - type: textarea
+    id: log
+    attributes:
+      label: Fragmento de log
+      description: |
+        Pega solo las líneas útiles de `%LOCALAPPDATA%\DefenderTray\Logs\DefenderTray_AAAA-MM-DD.log`
+        (o de `Auditoria\` si usas `-audit`). **Elimina nombres de usuario, rutas y equipos reales.**
+      render: text
+      placeholder: |
+        [2026-10-18 09:12:03] [INFO] DefenderTray v8.1 ULTIMATE iniciado
+        [2026-10-18 09:12:04] [WARN] Admin: NO
+  - type: textarea
+    id: nowin
+    attributes:
+      label: Consecuencia en el equipo
+      description: ¿Quedó Defender desactivado o a medias? ¿Tuviste que restaurar el registro o reiniciar?
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Confirmaciones
+      options:
+        - label: Ejecuté primero con `-audit` y el problema se reproduce en una máquina propia o autorizada.
+          required: true
+        - label: No hay datos personales, rutas reales, tokens ni `.reg` de producción en este reporte.
+          required: true
+        - label: Busqué en los issues abiertos y cerrados y no existe uno igual.
+          required: true

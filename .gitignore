@@ -1,0 +1,49 @@
+# Estado local que genera DefenderTray al ejecutarse.
+# Nada de esto debe llegar al repositorio: contiene configuración con DPAPI,
+# tokens de Telegram/Firebase, historial, nombres de equipo y capturas del
+# modo forense. Ver SECURITY.md.
+
+# Carpeta de datos portable (-portable)
+DefenderTrayData/
+
+# Rutas de %LOCALAPPDATA%\DefenderTray replicadas si se trabaja dentro del repo
+config.dat
+historial.json
+profiles.json
+defendertray.db
+defendertray.db-shm
+defendertray.db-wal
+Logs/
+Auditoria/
+Forense/
+Backups/
+Perfiles/
+lib/System.Data.SQLite.dll
+lib/SQLite.Interop.dll
+updates/
+
+# Volcados del registro y reportes exportados
+*.reg
+*.xlsx
+*.csv
+*.pdf
+*.html
+
+# Residuos de desarrollo que ya causaron problemas en el histórico
+*.bak
+*.backup
+* - copia*
+*~
+*.tmp
+
+# Editores y sistema operativo
+.vscode/
+.idea/
+Thumbs.db
+desktop.ini
+ehthumbs.db
+
+# Python/Node locales (si se añaden herramientas auxiliares)
+__pycache__/
+*.pyc
+node_modules/

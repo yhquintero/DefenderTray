@@ -1,0 +1,137 @@
+name: CI
+
+# Comprobaciones rápidas y sin sorpresas: que los scripts parseen, que la
+# codificación sea la que PowerShell 5.1 espera y que la documentación no
+# tenga enlaces rotos. No ejecuta DefenderTray: nada de esto toca un Defender.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  VERSION_ACTUAL: versiones/8
+
+jobs:
+  sintaxis:
+    name: Sintaxis de la versión soportada
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Parsear los .ps1 de la versión actual (bloqueante)
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $fallidos = 0
+          Get-ChildItem -Path $env:VERSION_ACTUAL -Filter *.ps1 -File | ForEach-Object {
+            $tokens = $null; $errores = $null
+            [void][System.Management.Automation.Language.Parser]::ParseFile($_.FullName, [ref]$tokens, [ref]$errores)
+            if ($errores -and $errores.Count -gt 0) {
+              $fallidos++
+              foreach ($e in $errores) {
+                "::error file=$($_.Name),line=$($e.Extent.StartLineNumber),col=$($e.Extent.StartColumnNumber):: $($e.Message)"
+              }
+            } else {
+              "OK  $($_.Name)  ($(([System.IO.File]::ReadAllLines($_.FullName)).Count) líneas)"
+            }
+          }
+          if ($fallidos -gt 0) {
+            "::error::$fallidos archivo(s) de $env:VERSION_ACTUAL no parsean"
+            exit 1
+          }
+
+  sintaxis-historico:
+    name: Sintaxis del histórico (informativo)
+    runs-on: windows-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Parsear el resto de versiones sin fallar el build
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Continue'
+          $actual = (Resolve-Path $env:VERSION_ACTUAL).Path
+          Get-ChildItem -Path versiones -Filter *.ps1 -File -Recurse |
+            Where-Object { $_.FullName -notlike "$actual*" } | ForEach-Object {
+              $tokens = $null; $errores = $null
+              [void][System.Management.Automation.Language.Parser]::ParseFile($_.FullName, [ref]$tokens, [ref]$errores)
+              $rel = $_.FullName.Substring($env:GITHUB_WORKSPACE.Length + 1)
+              if ($errores -and $errores.Count -gt 0) {
+                "::warning file=$rel::$($errores.Count) error(es) de sintaxis en una versión histórica (sin soporte)"
+              }
+            }
+
+  formato:
+    name: Codificación y finales de línea
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Sin BOM, CRLF en los .ps1 y literales ASCII
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $fallos = 0
+          $avisos = 0
+          Get-ChildItem -Path . -Filter *.ps1 -File -Recurse | ForEach-Object {
+            $rel   = $_.FullName.Substring($env:GITHUB_WORKSPACE.Length + 1).Replace('\','/')
+            $bytes = [System.IO.File]::ReadAllBytes($_.FullName)
+            if ($bytes.Length -ge 3 -and $bytes[0] -eq 0xEF -and $bytes[1] -eq 0xBB -and $bytes[2] -eq 0xBF) {
+              "::error file=$rel::el archivo empieza con BOM; PowerShell 5.1 y el repositorio trabajan sin BOM"
+              $fallos++
+            }
+            $texto = [System.Text.Encoding]::UTF8.GetString($bytes)
+            $lf    = ([regex]::Matches($texto, "(?<!`r)`n")).Count
+            if ($lf -gt 0) {
+              "::error file=$rel::$lf salto(s) de línea LF sin CR; los .ps1 se guardan con CRLF (.gitattributes)"
+              $fallos++
+            }
+            if ($texto -match '[^\x09\x0A\x0D\x20-\x7E]') {
+              $raros = ([regex]::Matches($texto, '[^\x09\x0A\x0D\x20-\x7E]')).Count
+              "::warning file=$rel::$raros carácter(es) fuera del ASCII: en PowerShell 5.1 un .ps1 sin BOM se lee como ANSI y la tilde o la eñe se verán rotas (usa [char]0x00F1 o quítalos de las cadenas visibles)"
+              $avisos++
+            }
+          }
+          "Archivos .ps1 revisados: $(@((Get-ChildItem -Path . -Filter *.ps1 -File -Recurse)).Count) · fallos: $fallos · avisos de codificación: $avisos"
+          if ($fallos -gt 0) { exit 1 }
+
+  analisis:
+    name: PSScriptAnalyzer
+    runs-on: windows-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Analizar la versión actual
+        shell: powershell
+        run: |
+          Install-Module PSScriptAnalyzer -Scope CurrentUser -Force -AllowClobber -SkipPublisherCheck
+          $informe = Invoke-ScriptAnalyzer -Path $env:VERSION_ACTUAL -Recurse -Severity Warning,Error
+          if (-not $informe) { 'Sin avisos de PSScriptAnalyzer.'; exit 0 }
+          foreach ($i in $informe) {
+            "::warning file=$($i.ScriptPath.Substring($env:GITHUB_WORKSPACE.Length + 1).Replace('\','/')),line=$($i.Line)::[$($i.RuleName)] $($i.Message)"
+          }
+          "Avisos: $($informe.Count)"
+
+  docs:
+    name: Enlaces y anclas de la documentación
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Comprobar README, CONTRIBUTING, SECURITY y CHANGELOG
+        run: python .github/check_markdown_links.py

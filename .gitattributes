@@ -1,0 +1,39 @@
+# Normalización de finales de línea.
+#
+# Los scripts .ps1 se escriben y se distribuyen con CRLF: el bloc de notas,
+# PowerShell 5.1 y los propios diálogos del proyecto (Normalize-LineEndings)
+# lo esperan así. Los documentos se guardan con LF.
+#
+# Nota para quien clona en Linux/macOS con core.autocrlf=input: el atributo
+# eol=crlf gana, así que el archivo de trabajo mantiene CRLF.
+
+*                text=auto eol=lf
+
+*.ps1            text eol=crlf
+*.psm1           text eol=crlf
+*.psd1           text eol=crlf
+*.reg            text eol=crlf
+*.cmd            text eol=crlf
+*.bat            text eol=crlf
+
+*.md             text eol=lf
+*.yml            text eol=lf
+*.yaml           text eol=lf
+*.json           text eol=lf
+*.txt            text eol=lf
+LICENSE          text eol=lf
+
+*.png            binary
+*.jpg            binary
+*.jpeg           binary
+*.gif            binary
+*.ico            binary
+*.pdf            binary
+*.zip            binary
+*.msi            binary
+*.dll            binary
+*.db             binary
+
+# Generado por: no revisar en los diff de pull request
+*.bak            linguist-generated
+*.db-wal         linguist-generated

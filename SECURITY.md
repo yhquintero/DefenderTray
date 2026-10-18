@@ -84,6 +84,7 @@ Para reportes, indica siempre **versión exacta y SHA256** del `.ps1` que usas (
 - **Solo bucle invertido.** La API se enlaza a `127.0.0.1` (no a `+` ni a `*`), y `HttpListener` rechaza peticiones cuyo encabezado `Host` no corresponda al prefijo registrado, lo que corta el *DNS rebinding* clásico.
 - **Respaldo antes de romper.** `Backup-DefenderRegistry` exporta `HKLM\SOFTWARE\Policies\Microsoft\Windows Defender` a un `.reg` con marca de tiempo antes de la desactivación.
 - **Verificación en vez de confianza.** Cada secuencia acaba comprobando servicio, proceso, `Get-MpComputerStatus` y modo de arranque, y cada actualización puede comprobarse contra SHA256.
+- **La integración continua no ejecuta nada.** [`.github/workflows/ci.yml`](.github/workflows/ci.yml) analiza sintaxis, codificación y enlaces: no arranca DefenderTray ni toca el registro, así que las pruebas no abren una superficie nueva. Las únicas dependencias versionadas son las acciones de GitHub, vigiladas con [Dependabot](.github/dependabot.yml).
 
 **Qué sale del equipo y cuándo**
 
