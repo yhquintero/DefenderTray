@@ -9,6 +9,23 @@ Historial de DefenderTray reconstruido **a partir de lo que declaran los propios
 >
 > El formato sigue [Keep a Changelog](https://keepachangelog.com/es/1.1.0/) (`Añadido`, `Cambiado`, `Corregido`, `Obsoleto`) y la numeración del proyecto es *ad-hoc*: la rama 4.x usó sufijos `+`, `Pro`, `_Final` en lugar de números.
 
+## [Sin publicar] — conservación de firmas y botones (2026-10-18)
+
+### Corregido
+
+- La versión mantenida **8.2** pausa únicamente la protección en tiempo real. Ya no mata `MsMpEng`, `MpCmdRun` ni otros procesos, deshabilita servicios/controladores, cambia Tamper Protection o borra políticas al desactivar. Windows puede reactivar automáticamente la pausa.
+- Activar no detiene ni reinicia el motor. La recuperación de bloqueos antiguos elimina valores concretos, con respaldo previo, sin borrar ramas completas ni `Signature Updates`. No recupera políticas que una versión anterior ya haya eliminado.
+- **Reparar Firmas** y la reparación automática actualizan sin eliminar definiciones. Se quitan `-RemoveDefinitions -All` y el parámetro inválido `-UpdateInterval 0`. Se comprueban versión y fecha; un fallo de descarga no se etiqueta como éxito.
+- Los botones **Activar / Desactivar** recuperan las posiciones de 8.1, uno junto al otro. Se modifica realmente `Enabled`, no solo el color. Al finalizar una operación se recalculan: ACTIVO permite desactivar, una pausa permite activar y PARCIAL prioriza recuperar protección; ocupado bloquea ambos.
+- El estado consulta `Get-MpComputerStatus`: ni un proceso activo ni políticas pendientes bastan para anunciar éxito. `Set-MpPrefValue` usa `ErrorAction=Stop` para detectar errores no terminantes.
+- Reparación profunda ya no ofrece matar el motor ni borrar ramas completas de políticas.
+
+### Añadido
+
+- [Pruebas y protocolo manual](tests/README.md): contratos estáticos Python y suite PowerShell con Defender/registro/descargas simulados, integrada en CI de Windows. La validación real en una VM Windows sigue siendo necesaria.
+
+Las notas históricas que siguen describen el comportamiento anterior, no el control de protección corregido.
+
 ## [Sin publicar] — infraestructura del repositorio
 
 No cambia el comportamiento del script: es todo lo que hay a su alrededor.

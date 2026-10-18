@@ -12,7 +12,7 @@
 
 | Archivo | Líneas | Bytes | Estado | Qué aporta |
 |---|---:|---:|:--:|---|
-| [`DefenderTray_8.2_Pro.ps1`](8/DefenderTray_8.2_Pro.ps1) | 5 119 | 254 936 | ✅ | **Versión de referencia.** 66 secciones, 144 funciones. Botón verde **ACTIVAR PROTECCIÓN** siempre visible, también con estado `PARCIAL`, junto al interruptor contextual de un clic; verificación de la activación, restauración de servicios y protecciones y estado `DESACTIVADO` con aviso de reinicio pendiente. |
+| [`DefenderTray_8.2_Pro.ps1`](8/DefenderTray_8.2_Pro.ps1) | 4 777 | 237 005 | ✅ | **Versión de referencia.** 145 funciones. **Activar / Desactivar** adyacentes y según estado real; pausa no destructiva de tiempo real, actualización de firmas sin borrado y recuperación selectiva de bloqueos antiguos. |
 | [`DefenderTray_8.1_Pro.ps1`](8/DefenderTray_8.1_Pro.ps1) | 4 747 | 236 088 | 📦 | 65 secciones, 134 funciones. Mismo código que la 8.0 con las cadenas de versión actualizadas. Sus activar/desactivar fallaban en silencio por el bug de `Set-MpPreference` (hashtable posicional + `-Force` inexistente): corregido en la 8.2. |
 | [`DefenderTray_8.0_Pro.ps1`](8/DefenderTray_8.0_Pro.ps1) | 4 747 | 236 088 | 📦 | SQLite cifrado, firma Authenticode + guía EV, MSI con WiX, FCM v1, consola Fleet, anomalías Z-score, Active Directory, GraphQL, PWA, kiosco biométrico, webhooks, Excel/CSV, panel SSE, autoactualización con SHA256 y empaquetado Docker. |
 | [`DefenderTray.wxs`](8/DefenderTray.wxs) | 61 | 3 394 | ✅ | Plantilla de WiX v3 **corregida**: x64 (`Platform="x64"` + `Win64="yes"`) y acceso directo por máquina dentro de `ProgramMenuDir`, con lo que no salen los errores ICE80 ni ICE64. |
