@@ -50,6 +50,99 @@ $script:ScriptPath = $PSCommandPath
 if ([string]::IsNullOrWhiteSpace($script:ScriptPath)) { $script:ScriptPath = $MyInvocation.MyCommand.Path }
 $script:ScriptDir = if ($script:ScriptPath) { Split-Path -Parent $script:ScriptPath } else { (Get-Location).Path }
 
+# ============================================================================
+# SECCION 2b - AUTO-ELEVACION A ADMINISTRADOR (obligatoria)
+# ============================================================================
+# DefenderTray manipula Defender, las politicas del registro y los servicios
+# del sistema: todo eso exige Administrador. Si el script arranca sin
+# permisos, se relanza a si mismo elevado (UAC) y espera al proceso elevado
+# para devolver su codigo de salida. Con -noelevate se desactiva este
+# comportamiento (pruebas, auditoria o equipos sin UAC).
+$script:NoElevate = ($args -contains "-noelevate")
+$script:CliArgs   = @($args)
+
+function Test-IsAdministrator {
+    try {
+        $identity  = [Security.Principal.WindowsIdentity]::GetCurrent()
+        $principal = New-Object Security.Principal.WindowsPrincipal($identity)
+        return $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
+    } catch { return $false }
+}
+
+function Get-PowerShellHostPath {
+    # Ruta del ejecutable de PowerShell en curso (pwsh.exe o powershell.exe)
+    # para relanzar el script con el mismo motor y la misma version.
+    try {
+        $exe = [System.Diagnostics.Process]::GetCurrentProcess().MainModule.FileName
+        if ($exe -and (Test-Path -LiteralPath $exe) -and
+            ([IO.Path]::GetFileNameWithoutExtension($exe) -in @("pwsh", "powershell"))) {
+            return $exe
+        }
+    } catch { }
+    foreach ($candidato in @((Join-Path $PSHOME "pwsh.exe"), (Join-Path $PSHOME "powershell.exe"))) {
+        if (Test-Path -LiteralPath $candidato) { return $candidato }
+    }
+    return "powershell.exe"
+}
+
+function Invoke-SelfElevation {
+    # Relanza el script actual como Administrador (UAC). Devuelve el codigo de
+    # salida del proceso elevado o -1 si el usuario cancela el UAC.
+    $exe = Get-PowerShellHostPath
+    $linea = @("-NoProfile", "-ExecutionPolicy", "Bypass", "-File", ('"{0}"' -f $script:ScriptPath))
+    foreach ($a in $script:CliArgs) {
+        if ($null -eq $a) { continue }
+        $linea += $(if ("$a" -match "\s") { '"{0}"' -f $a } else { "$a" })
+    }
+    $opciones = @{
+        FilePath     = $exe
+        ArgumentList = $linea
+        Verb         = "RunAs"
+        PassThru     = $true
+        Wait         = $true
+        ErrorAction  = "Stop"
+    }
+    # Si la consola actual esta oculta (acceso directo del MSI, tarea
+    # programada, -silent), el proceso elevado tambien se oculta: el
+    # DefenderTray es una aplicacion de bandeja y no debe ensuciar el
+    # escritorio con una ventana de consola.
+    $oculto = $script:SilentMode
+    if (-not $oculto) {
+        try {
+            $cmdPadre = (Get-CimInstance Win32_Process -Filter "ProcessId = $PID" -ErrorAction Stop).CommandLine
+            if ($cmdPadre -match "-WindowStyle\s+Hidden") { $oculto = $true }
+        } catch { }
+    }
+    if ($oculto) { $opciones["WindowStyle"] = "Hidden" }
+    try {
+        $proc = Start-Process @opciones
+        try { return $proc.ExitCode } catch { return 0 }
+    } catch { return -1 }
+}
+
+if (-not $script:NoElevate -and -not (Test-IsAdministrator)) {
+    if ($env:DEFENDERTRAY_ELEVATED -eq "1") {
+        # El relanzamiento elevado ya se intento: no se repite (evita bucles).
+        Write-Warning "DefenderTray necesita Administrador y no se ha podido elevar (UAC)."
+    } elseif ([string]::IsNullOrWhiteSpace($script:ScriptPath)) {
+        Write-Warning "DefenderTray: sin ruta de script no se puede elevar a Administrador."
+    } else {
+        $env:DEFENDERTRAY_ELEVATED = "1"
+        $codigo = Invoke-SelfElevation
+        if ($codigo -lt 0) {
+            $mensaje = "DefenderTray necesita ejecutarse como Administrador. Acepta el UAC para continuar."
+            if ($script:SilentMode) {
+                Write-Error $mensaje
+            } else {
+                try { [System.Windows.Forms.MessageBox]::Show($mensaje, "DefenderTray", "OK", "Warning") | Out-Null }
+                catch { Write-Error $mensaje }
+            }
+            exit 1
+        }
+        exit $codigo
+    }
+}
+
 if ($script:PortableMode) {
     $script:ConfigDir = Join-Path $script:ScriptDir "DefenderTrayData"
 } else {
@@ -589,8 +682,8 @@ function Update-TrayIcon {
 # SECCION 14 - UTILIDADES
 # ============================================================================
 function Test-Admin {
-    return ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole(
-        [Security.Principal.WindowsBuiltInRole]::Administrator)
+    # Misma comprobacion que usa la auto-elevacion (SECCION 2b).
+    return (Test-IsAdministrator)
 }
 
 # ============================================================================
@@ -942,6 +1035,36 @@ GUIA DE FIRMA DIGITAL - DefenderTray v8.0
 # ============================================================================
 # SECCION 18 - v8.0: MSI CON WIX TOOLSET
 # ============================================================================
+function Get-WixToolPath {
+    # Devuelve la ruta de candle.exe / light.exe. Primero mira en el PATH y
+    # luego en las instalaciones habituales de WiX Toolset v3 (por ejemplo
+    # "C:\Program Files (x86)\WiX Toolset v3.11\bin"), anadiendo el directorio
+    # al PATH de la sesion para poder invocarlos por su nombre.
+    param([Parameter(Mandatory = $true)][string]$Ejecutable)
+
+    $enPath = Get-Command $Ejecutable -ErrorAction SilentlyContinue
+    if ($enPath) { return $enPath.Source }
+
+    $candidatos = New-Object System.Collections.ArrayList
+    [void]$candidatos.Add("C:\Program Files (x86)\WiX Toolset v3.11\bin")
+    [void]$candidatos.Add("C:\Program Files\WiX Toolset v3.11\bin")
+    foreach ($base in @("C:\Program Files (x86)", "C:\Program Files")) {
+        if (-not (Test-Path $base)) { continue }
+        Get-ChildItem -Path $base -Directory -Filter "WiX Toolset v*" -ErrorAction SilentlyContinue |
+            Sort-Object -Property Name -Descending |
+            ForEach-Object { [void]$candidatos.Add((Join-Path $_.FullName "bin")) }
+    }
+
+    foreach ($dir in $candidatos) {
+        $exe = Join-Path $dir $Ejecutable
+        if (Test-Path -LiteralPath $exe) {
+            if (($env:PATH -split ";") -notcontains $dir) { $env:PATH = "$dir;$env:PATH" }
+            return $exe
+        }
+    }
+    return $null
+}
+
 function New-WixInstallerPackage {
     param([string]$OutputDir = "$env:USERPROFILE\Desktop\DefenderTray_v8_MSI")
     try {
@@ -951,32 +1074,47 @@ function New-WixInstallerPackage {
 
         $wxs = @'
 <?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Instalador de DefenderTray 8.0 (WiX Toolset v3, x64, instalacion por maquina).
+
+  Los tres puntos que hacen que compile sin los errores ICE de siempre:
+    * Platform="x64" y Win64="yes" -> el paquete y sus componentes son de
+      64 bits (ICE80: "This 32BitComponent ... uses 64BitDirectory ...").
+    * El componente del acceso directo vive dentro de ProgramMenuDir y su
+      RemoveFolder declara el directorio -> la carpeta queda en la tabla
+      RemoveFile (ICE64: "The directory ProgramMenuDir is in the user profile
+      but is not listed in the RemoveFile table").
+    * La clave de registro es HKLM -> el componente es por maquina y el menu
+      Inicio es el de todos los usuarios, no el del perfil del usuario.
+-->
 <Wix xmlns="http://schemas.microsoft.com/wix/2006/wi">
   <Product Id="*" Name="DefenderTray Ultimate" Language="1033"
            Version="8.0.0.0" Manufacturer="Ing. Yosvany Hernandez Quintero"
            UpgradeCode="A1B2C3D4-E5F6-7890-ABCD-EF1234567890">
-    <Package InstallerVersion="500" Compressed="yes" InstallScope="perMachine"/>
+    <Package InstallerVersion="500" Compressed="yes" InstallScope="perMachine" Platform="x64"/>
     <MajorUpgrade DowngradeErrorMessage="Ya existe una version instalada."/>
     <MediaTemplate EmbedCab="yes"/>
+    <Condition Message="DefenderTray necesita Windows de 64 bits (x64).">VersionNT64</Condition>
     <Directory Id="TARGETDIR" Name="SourceDir">
       <Directory Id="ProgramFiles64Folder">
         <Directory Id="INSTALLFOLDER" Name="DefenderTray">
-          <Component Id="MainScript" Guid="*">
+          <Component Id="MainScript" Guid="*" Win64="yes">
             <File Id="ScriptPs1" Source="DefenderTray_8.0.ps1" KeyPath="yes"/>
-          </Component>
-          <Component Id="StartMenuShortcut" Guid="*">
-            <Shortcut Id="AppShortcut" Directory="ProgramMenuDir"
-                      Name="DefenderTray v8.0"
-                      Target="[System64Folder]WindowsPowerShell\v1.0\powershell.exe"
-                      Arguments="-WindowStyle Hidden -ExecutionPolicy Bypass -File &quot;[INSTALLFOLDER]DefenderTray_8.0.ps1&quot;"
-                      WorkingDirectory="INSTALLFOLDER"/>
-            <RemoveFolder Id="ProgramMenuDir" On="uninstall"/>
-            <RegistryValue Root="HKCU" Key="Software\DefenderTray" Name="installed" Type="integer" Value="1" KeyPath="yes"/>
           </Component>
         </Directory>
       </Directory>
       <Directory Id="ProgramMenuFolder" Name="Programs">
-        <Directory Id="ProgramMenuDir" Name="DefenderTray"/>
+        <Directory Id="ProgramMenuDir" Name="DefenderTray">
+          <Component Id="StartMenuShortcut" Guid="*" Win64="yes">
+            <Shortcut Id="AppShortcut" Directory="ProgramMenuDir"
+                      Name="DefenderTray v8.0"
+                      Target="[System64Folder]WindowsPowerShell\v1.0\powershell.exe"
+                      Arguments="-NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File &quot;[INSTALLFOLDER]DefenderTray_8.0.ps1&quot;"
+                      WorkingDirectory="INSTALLFOLDER"/>
+            <RemoveFolder Id="ProgramMenuDir" Directory="ProgramMenuDir" On="uninstall"/>
+            <RegistryValue Root="HKLM" Key="Software\DefenderTray" Name="installed" Type="integer" Value="1" KeyPath="yes"/>
+          </Component>
+        </Directory>
       </Directory>
     </Directory>
     <Feature Id="MainFeature" Title="DefenderTray v8.0" Level="1">
@@ -1003,16 +1141,16 @@ Movil: +53 5 2160801 / +53 5 9860911\par
 '@
         Set-Content -Path (Join-Path $OutputDir "License.rtf") -Value $licenseRtf -Encoding ASCII -Force
 
-        $candle = Get-Command candle.exe -ErrorAction SilentlyContinue
-        $light = Get-Command light.exe -ErrorAction SilentlyContinue
+        $candle = Get-WixToolPath -Ejecutable "candle.exe"
+        $light  = Get-WixToolPath -Ejecutable "light.exe"
         $msiPath = Join-Path $OutputDir "DefenderTray_v8.0.msi"
 
         if ($candle -and $light) {
             Push-Location $OutputDir
             try {
-                $null = & candle.exe -ext WixUIExtension DefenderTray.wxs 2>&1
+                $null = & $candle -nologo -arch x64 -ext WixUIExtension DefenderTray.wxs 2>&1
                 if (Test-Path "DefenderTray.wixobj") {
-                    $null = & light.exe -ext WixUIExtension -o "DefenderTray_v8.0.msi" DefenderTray.wixobj 2>&1
+                    $null = & $light -nologo -ext WixUIExtension -o "DefenderTray_v8.0.msi" DefenderTray.wixobj 2>&1
                 }
             } finally { Pop-Location }
             if (Test-Path $msiPath) { return "MSI generado: $msiPath" }
@@ -1027,12 +1165,13 @@ Archivos generados:
   - License.rtf           (EULA)
 
 Para generar el MSI:
-  1. Descarga WiX Toolset v3.14: https://wixtoolset.org/releases/
-  2. Instala (incluye candle.exe y light.exe en PATH)
+  1. Instala WiX Toolset v3.11: https://wixtoolset.org/releases/
+  2. Anade al PATH de Windows: C:\Program Files (x86)\WiX Toolset v3.11\bin
+     (o ejecuta .\Add-WiXToPath.ps1 -Scope Machine como Administrador)
   3. Ejecuta de nuevo esta opcion, o manualmente:
      cd "$OutputDir"
-     candle.exe -ext WixUIExtension DefenderTray.wxs
-     light.exe  -ext WixUIExtension -o DefenderTray_v8.0.msi DefenderTray.wixobj
+     candle.exe -nologo -arch x64 -ext WixUIExtension DefenderTray.wxs
+     light.exe  -nologo -ext WixUIExtension -o DefenderTray_v8.0.msi DefenderTray.wixobj
 "@
     } catch { return "Error: $($_.Exception.Message)" }
 }

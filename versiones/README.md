@@ -15,6 +15,9 @@
 | [`DefenderTray_8.2_Pro.ps1`](8/DefenderTray_8.2_Pro.ps1) | 4 939 | 246 509 | ✅ | **Versión de referencia.** 66 secciones, 142 funciones. Un solo clic para activar/desactivar **completo** (sin confirmaciones ni diálogos modales), fix crítico de `Set-MpPreference` (las 15+ protecciones ahora sí se aplican), desactivación/activación totales, Tamper Protection guiada en vez de abortada y estado `DESACTIVADO` real con aviso de reinicio pendiente. |
 | [`DefenderTray_8.1_Pro.ps1`](8/DefenderTray_8.1_Pro.ps1) | 4 747 | 236 088 | 📦 | 65 secciones, 134 funciones. Mismo código que la 8.0 con las cadenas de versión actualizadas. Sus activar/desactivar fallaban en silencio por el bug de `Set-MpPreference` (hashtable posicional + `-Force` inexistente): corregido en la 8.2. |
 | [`DefenderTray_8.0_Pro.ps1`](8/DefenderTray_8.0_Pro.ps1) | 4 747 | 236 088 | 📦 | SQLite cifrado, firma Authenticode + guía EV, MSI con WiX, FCM v1, consola Fleet, anomalías Z-score, Active Directory, GraphQL, PWA, kiosco biométrico, webhooks, Excel/CSV, panel SSE, autoactualización con SHA256 y empaquetado Docker. |
+| [`DefenderTray.wxs`](8/DefenderTray.wxs) | 61 | 3 394 | ✅ | Plantilla de WiX v3 **corregida**: x64 (`Platform="x64"` + `Win64="yes"`) y acceso directo por máquina dentro de `ProgramMenuDir`, con lo que no salen los errores ICE80 ni ICE64. |
+| [`build-msi.ps1`](8/build-msi.ps1) | 144 | 5 999 | ✅ | Compila el MSI: pone WiX en el PATH, copia el script con el nombre que espera el `.wxs` y ejecuta candle + light. |
+| [`Add-WiXToPath.ps1`](8/Add-WiXToPath.ps1) | 133 | 4 933 | ✅ | Añade `C:\Program Files (x86)\WiX Toolset v3.11\bin` al PATH de Windows (`-Scope User`/`-Scope Machine`, `-SessionOnly`, `-Remove`). |
 
 ## 7 — Web, voz y modo forense
 
