@@ -21,7 +21,30 @@ No cambia el comportamiento del script: es todo lo que hay a su alrededor.
 - Plantillas de issue (error y propuesta), plantilla de pull request y `dependabot.yml` para las acciones.
 - [`.gitignore`](.gitignore) para el estado local que genera la herramienta y [`.gitattributes`](.gitattributes) para fijar CRLF en los `.ps1`.
 
-## [8.1 ULTIMATE] ⭐ actual
+## [8.2 ULTIMATE] ⭐ actual
+
+📄 [`versiones/8/DefenderTray_8.2_Pro.ps1`](versiones/8/DefenderTray_8.2_Pro.ps1) · 4 939 líneas · 66 secciones · 142 funciones
+
+### Corregido
+
+- **Bug crítico de `Set-MpPreference` que causaba activaciones y desactivaciones parciales.** Las llamadas de las secciones de activar/desactivar hacían `Set-MpPreference @{ $p = $true } -Force`: PowerShell intenta enlazar el hashtable como parámetro *posicional* (falla siempre) y `-Force` **no existe** en `Set-MpPreference`, así que **todas** las llamadas —las 13 preferencias con hashtable y las nominales con `-Force`— fallaban en silencio (`catch { }`) y las 15+ protecciones nunca se aplicaban. Ahora cada preferencia se aplica por su nombre real mediante *splatting* (`Set-MpPrefValue`).
+- Mismo `-Force` inválido eliminado de `Add-MpPreference` (exclusiones) y de `Set-MpPreference -DisableRealtimeMonitoring` del Deep Repair.
+
+### Cambiado
+
+- **Desactivación TOTAL en una sola pasada**: preferencias reales → políticas ampliadas (AntiSpyware, RTP, Spynet, Exploit Guard/Network Protection, PUA, SmartScreen) → FailureActions → muerte de procesos + `Start=4` con reintentos → intento de bajar Tamper Protection por registro → verificación granular.
+- **Activación TOTAL en una sola pasada**: servicios restaurados → políticas eliminadas (incluidas ExploitGuard/PUA/SmartScreen) → claves RTP limpiadas → 13 preferencias reactivadas con reintentos hasta confirmar Protección en tiempo real → Tamper Protection → verificación.
+- **Un solo clic, sin dobles clics**: eliminado el diálogo de confirmación «Desactivar Windows Defender?» y el diálogo modal de resultado de la acción rápida; el resultado se avisa por globo. El sentido del interruptor se decide solo: ACTIVO → desactiva; DESACTIVADO → activa; PARCIAL → termina lo que esté a medias.
+- **Tamper Protection ya no aborta** la desactivación: se aplica todo lo posible (lo persistente se conserva) y, si Windows bloquea el resto, se guía con un botón para abrir Seguridad de Windows (`windowsdefender://threatsettings`).
+- **Estado `DESACTIVADO` real**: con políticas + servicios deshabilitados se reporta `DESACTIVADO` (con el detalle «reinicio pendiente» cuando Windows 11 22H2+ aún no ha soltado `WinDefend`), no `PARCIAL`. `PARCIAL` queda reservado a estados a medio hacer.
+
+### Añadido
+
+- Interruptor único **«UN CLIC»** en el panel (botón grande que cambia de texto y color según la acción que va a ejecutar), en el menú de bandeja y en el menú Acciones del panel.
+- CLI: `-action toggle` además de `enable`/`disable`.
+- Helpers `Set-MpPrefValue`, `Test-TamperProtectionActive`, `Disable-TamperProtectionBestEffort`, `Show-TamperProtectionGuide`, `Test-DefenderServicesDisabled`, `Get-ToggleAction`, `Invoke-ToggleProtection` y `Set-ToggleButtonLook`.
+
+## [8.1 ULTIMATE]
 
 📄 [`versiones/8/DefenderTray_8.1_Pro.ps1`](versiones/8/DefenderTray_8.1_Pro.ps1) · 4 747 líneas · 65 secciones · 134 funciones
 
