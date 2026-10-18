@@ -11,7 +11,7 @@
 [![Versión](https://img.shields.io/badge/versi%C3%B3n-8.2%20ULTIMATE-4f46e5?style=flat-square)](versiones/8/DefenderTray_8.2_Pro.ps1)
 [![PowerShell](https://img.shields.io/badge/PowerShell-5.1%2B-012456?style=flat-square&logo=powershell&logoColor=white)](#-requisitos)
 [![Plataforma](https://img.shields.io/badge/Windows-10%20%C2%B7%2011%20%C2%B7%20Server-0078D4?style=flat-square&logo=windows&logoColor=white)](#-requisitos)
-[![Un solo archivo](https://img.shields.io/badge/un%20solo%20archivo-4%20939%20l%C3%ADneas-059669?style=flat-square)](versiones/8/DefenderTray_8.2_Pro.ps1)
+[![Un solo archivo](https://img.shields.io/badge/un%20solo%20archivo-5%20119%20l%C3%ADneas-059669?style=flat-square)](versiones/8/DefenderTray_8.2_Pro.ps1)
 [![API local](https://img.shields.io/badge/API%20local-REST%20%C2%B7%20GraphQL%20%C2%B7%20SSE%20%C2%B7%20PWA-1e1b4b?style=flat-square)](#-api-local)
 [![Licencia](https://img.shields.io/badge/licencia-propietaria-475569?style=flat-square)](LICENSE)
 [![Seguridad](https://img.shields.io/badge/seguridad-pol%C3%ADtica%20publicada-FF3366?style=flat-square)](SECURITY.md)
@@ -41,7 +41,7 @@ A partir de la rama 8.x el proyecto dejó de ser un simple *toggle* y añade una
 | Pieza | Para qué sirve |
 |---|---|
 | 🟢 **Icono en la bandeja** | Estado en un color (verde *activo*, rojo *desactivado*, ámbar *parcial*), menú con las acciones frecuentes y notificaciones al terminar cada operación. |
-| 🎛️ **Panel principal** | Diagnóstico, **interruptor UN CLIC** (activar/desactivar completo), Reparación profunda, **EMERGENCIA** (reactivación de un clic), Event Log, Historial, Config, Ayuda y Salir. Tema oscuro/claro automático, paleta personalizable y apertura en el monitor activo. |
+| 🎛️ **Panel principal** | Diagnóstico, botón verde **ACTIVAR PROTECCIÓN** siempre visible, **interruptor UN CLIC** para la acción contextual, Reparación profunda, **EMERGENCIA** (reactivación de un clic), Event Log, Historial, Config, Ayuda y Salir. Tema oscuro/claro automático, paleta personalizable y apertura en el monitor activo. |
 | 🧬 **Motor de activación/desactivación** | Secuencia de 10-11 pasos ordenada por dependencias, bucle de reintento (hasta 5) y verificación final; respaldo `.reg` de las políticas antes de tocar nada. Las preferencias `Set-MpPreference` se aplican de verdad (splatting por nombre; en ≤8.1 fallaban todas en silencio). |
 | 🩺 **Diagnóstico y reparación** | Informe por capítulos (servicios, drivers, políticas, firmas, red, AV de terceros, Event Log), reparación de firmas corruptas (errores 31/12/1969), `sfc /scannow`, `DISM /RestoreHealth`, `gpupdate` y limpieza de políticas huérfanas. |
 | 🗄️ **Historial y datos** | SQLite cifrado cuando el proveedor está disponible y JSON como respaldo: cada acción queda registrada con resultado y duración; exportación a CSV/Excel y estadísticas. |
@@ -52,7 +52,7 @@ A partir de la rama 8.x el proyecto dejó de ser un simple *toggle* y añade una
 
 ## ✨ Funciones destacadas
 
-- ⚡ **Un clic, resultado verificable.** El interruptor «UN CLIC» del panel (y el del menú de bandeja) ejecuta la acción **completa** en un solo clic, sin confirmación ni diálogo modal y con aviso por globo; las acciones clásicas siguen ofreciendo el log paso a paso. Todo termina con una comprobación real (`Get-MpComputerStatus`, estado del servicio, proceso `MsMpEng`, modo de arranque) y queda en el Historial con el tiempo empleado.
+- ⚡ **Activar siempre a mano.** El panel conserva el botón verde «ACTIVAR PROTECCIÓN» en todos los estados, incluido `PARCIAL`; llama directamente al flujo de restauración, actualiza el estado y registra el resultado. El interruptor «UN CLIC» mantiene su acción contextual y avisa por globo; todo termina con una comprobación real (`Get-MpComputerStatus`, estado del servicio, proceso `MsMpEng`, modo de arranque) y queda en el Historial con el tiempo empleado.
 - 💾 **Reversible por diseño.** Antes de modificar el registro se exporta un `.reg` a `Backups\Registro`; **Configuración** ofrece el botón *Restaurar Registro* con el último respaldo disponible y la Reparación profunda permite reconstruir el estado limpio sin reiniciar.
 - 🚨 **Botón de emergencia.** Reactiva Defender y sus servicios en la máquina afectada aunque el panel esté cerrado; notifica a los canales configurados y queda en el historial.
 - 👁️ **Modo auditoría (`-audit`).** Evalúa y registra lo que *haría*, sin escribir una sola tecla de registro. Es la forma recomendada de probar la herramienta antes de usarla en serio.
@@ -247,7 +247,7 @@ El código vive en [`versiones/`](versiones/), una carpeta por hito. Esta es la 
 
 | Versión | Archivo | Qué aportó |
 |---|---|---|
-| **8.2 ULTIMATE** ⭐ | [`versiones/8/DefenderTray_8.2_Pro.ps1`](versiones/8/DefenderTray_8.2_Pro.ps1) | Actual **y recomendada**. **Un solo clic** para activar/desactivar **completo** (sin confirmaciones ni diálogos modales), fix crítico de `Set-MpPreference` que dejaba las 15+ protecciones sin aplicar (activaciones/desactivaciones parciales), Tamper Protection guiada en vez de abortada y estado `DESACTIVADO` real con aviso de reinicio pendiente. Hereda todo lo de la 8.1. |
+| **8.2 ULTIMATE** ⭐ | [`versiones/8/DefenderTray_8.2_Pro.ps1`](versiones/8/DefenderTray_8.2_Pro.ps1) | Actual **y recomendada**. Botón directo **ACTIVAR PROTECCIÓN** siempre visible, incluso en estado `PARCIAL`, junto al interruptor contextual **UN CLIC**; fix crítico de `Set-MpPreference`, restauración de servicios y protecciones con verificación, Tamper Protection guiada y estado `DESACTIVADO` con aviso de reinicio pendiente. Hereda todo lo de la 8.1. |
 | 8.1 ULTIMATE | [`versiones/8/DefenderTray_8.1_Pro.ps1`](versiones/8/DefenderTray_8.1_Pro.ps1) | SQLite cifrado, firma Authenticode + guía EV, MSI con WiX, FCM v1, consola Fleet, anomalías por Z-score, Active Directory, GraphQL, PWA, kiosco biométrico, webhooks, Excel/CSV, panel SSE, autoactualización con SHA256 y empaquetado Docker. *Nota honesta:* v8.1 es **el mismo código que v8.0** con las cadenas de versión actualizadas (142 líneas, todas de texto). |
 | 8.0 ULTIMATE | [`versiones/8/DefenderTray_8.0_Pro.ps1`](versiones/8/DefenderTray_8.0_Pro.ps1) | Salto a «Enterprise Security Control»: las 15 funciones anteriores. |
 | 7.0 ULTIMATE | [`versiones/7/DefenderTray_7.0_Pro.ps1`](versiones/7/DefenderTray_7.0_Pro.ps1) | Panel web servido por la API, perfiles, Telegram, auto-reparación heurística, voz, PDF firmado, botón de pánico, Event Log, nube, multi-monitor, tema editable, tutela, modo forense. |

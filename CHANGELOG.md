@@ -36,7 +36,7 @@ No cambia el comportamiento del script: es todo lo que hay a su alrededor.
 
 ## [8.2 ULTIMATE] ⭐ actual
 
-📄 [`versiones/8/DefenderTray_8.2_Pro.ps1`](versiones/8/DefenderTray_8.2_Pro.ps1) · 4 939 líneas · 66 secciones · 142 funciones
+📄 [`versiones/8/DefenderTray_8.2_Pro.ps1`](versiones/8/DefenderTray_8.2_Pro.ps1) · 5 119 líneas · 66 secciones · 144 funciones
 
 ### Corregido
 
@@ -50,12 +50,14 @@ No cambia el comportamiento del script: es todo lo que hay a su alrededor.
 - **Un solo clic, sin dobles clics**: eliminado el diálogo de confirmación «Desactivar Windows Defender?» y el diálogo modal de resultado de la acción rápida; el resultado se avisa por globo. El sentido del interruptor se decide solo: ACTIVO → desactiva; DESACTIVADO → activa; PARCIAL → termina lo que esté a medias.
 - **Tamper Protection ya no aborta** la desactivación: se aplica todo lo posible (lo persistente se conserva) y, si Windows bloquea el resto, se guía con un botón para abrir Seguridad de Windows (`windowsdefender://threatsettings`).
 - **Estado `DESACTIVADO` real**: con políticas + servicios deshabilitados se reporta `DESACTIVADO` (con el detalle «reinicio pendiente» cuando Windows 11 22H2+ aún no ha soltado `WinDefend`), no `PARCIAL`. `PARCIAL` queda reservado a estados a medio hacer.
+- En `PARCIAL`, el panel indica que **ACTIVAR** restaura la protección y que el interruptor contextual sigue la acción pendiente; ya no hay que depender del menú `Acciones` para encontrar la activación.
 
 ### Añadido
 
-- Interruptor único **«UN CLIC»** en el panel (botón grande que cambia de texto y color según la acción que va a ejecutar), en el menú de bandeja y en el menú Acciones del panel.
+- Interruptor contextual **«UN CLIC»** en el panel (botón grande que cambia de texto y color según la acción), además de `Activar` y `Desactivar` directos en los menús.
+- Botón verde **ACTIVAR PROTECCIÓN** siempre visible en el panel, también en estado `PARCIAL`; ejecuta `Enable-Defender`, actualiza la interfaz y registra el resultado.
 - CLI: `-action toggle` además de `enable`/`disable`.
-- Helpers `Set-MpPrefValue`, `Test-TamperProtectionActive`, `Disable-TamperProtectionBestEffort`, `Show-TamperProtectionGuide`, `Test-DefenderServicesDisabled`, `Get-ToggleAction`, `Invoke-ToggleProtection` y `Set-ToggleButtonLook`.
+- Helpers `Set-MpPrefValue`, `Test-TamperProtectionActive`, `Disable-TamperProtectionBestEffort`, `Show-TamperProtectionGuide`, `Test-DefenderServicesDisabled`, `Get-ToggleAction`, `Invoke-ToggleProtection`, `Invoke-EnableProtection` y `Set-ToggleButtonLook`.
 
 ## [8.1 ULTIMATE]
 

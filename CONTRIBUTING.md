@@ -76,6 +76,7 @@ Ejecuta las filas relacionadas con tu cambio y pégalas en la descripción del p
 | Arranque | `powershell -File … .ps1` sin argumentos | Icono en la bandeja, color coherente con `Get-QuickStatus`, sin ventanas de error. |
 | Colores/tema | Cambia el tema de Windows (claro/oscuro) y vuelve a abrir | La paleta sigue la del sistema si «Seguir tema del sistema» está activo. |
 | Diálogos | `F1`, `F5`, `Esc`, cada botón del panel y del menú de la bandeja | Todos abren, muestran texto legible y cierran sin dejar procesos huérfanos. |
+| Activación parcial | Deja Defender en estado `PARCIAL` en una VM con instantánea y abre el panel | El botón verde **ACTIVAR PROTECCIÓN** sigue visible; al pulsarlo ejecuta la restauración y refresca estado, icono e historial. |
 | i18n | Alterna `ES`/`EN` en Configuración y reabre | Ninguna cadena visible se queda en el idioma anterior ni aparece vacía. |
 | Auditoría | `-audit` + una acción de desactivación | Log sin cambios reales; el estado de Defender no se mueve. |
 | API local | `Invoke-RestMethod http://127.0.0.1:9182/status` y `/`, `/pwa/`, `POST /graphql` | JSON coherente, panel HTML, manifiesto PWA y datos GraphQL. Con `-norest`, el puerto debe estar cerrado. |

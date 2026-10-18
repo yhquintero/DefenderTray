@@ -22,6 +22,8 @@
     6.  Politicas completas en ambos sentidos: Network Protection, PUA,
         SmartScreen, Exploit Guard y claves RTP del registro.
     7.  CLI: -action toggle ademas de enable/disable.
+    8.  ACTIVAR PROTECCION siempre visible en el panel, incluso en estado
+        PARCIAL; llama directamente a Enable-Defender y actualiza el estado.
   Conserva TODAS las funciones de la v8.1 (SQLite cifrado, MSI con WiX, FCM,
   Fleet, ML, Active Directory, GraphQL, PWA, kiosco biometrico, webhooks,
   Excel/CSV, SSE, auto-update, Docker, etc.).
@@ -2198,6 +2200,62 @@ function Invoke-ToggleProtection {
     }
 }
 
+function Invoke-EnableProtection {
+    param([string]$Accion = "Activar")
+    if (-not (Test-Admin)) {
+        if (-not $script:SilentMode) {
+            [System.Windows.Forms.MessageBox]::Show("Ejecuta como Administrador.","Permisos","OK","Warning") | Out-Null
+        }
+        return
+    }
+    if ($script:IsBusy) { return }
+
+    $panelVisible = ($null -ne $script:PanelForm -and -not $script:PanelForm.IsDisposed)
+    $script:IsBusy = $true
+    try {
+        if ($panelVisible) {
+            Set-PanelBusy $true
+            if ($null -ne $script:PanelLblDet1) {
+                $script:PanelLblDet1.Text = "Activando Windows Defender..."
+                $script:PanelLblDet1.ForeColor = $script:Colors.Warn
+            }
+        }
+        Start-ActionTimer
+        $script:LastActionName = $Accion
+        [System.Windows.Forms.Application]::DoEvents()
+        $log = Enable-Defender
+        $elapsed = Get-ActionElapsedSeconds
+        $script:LastActionTime = $elapsed
+        Stop-ActionTimer | Out-Null
+
+        $s = Get-QuickStatus
+        Add-HistoryDB -Accion $Accion -Resultado $s.Estado -Segundos $elapsed -Detalle $log
+        Update-PanelStatusUI
+        Update-TrayIcon -Estado $s.Estado
+
+        $mensaje = ("Estado: {0}. Activacion finalizada en {1:N2}s." -f $s.Estado, $elapsed)
+        if ($s.Estado -ne "ACTIVO") { $mensaje += " Revisa Diagnostico y Seguridad de Windows." }
+        if ($null -ne $script:notifyIcon) {
+            try {
+                $tipo = if ($s.Estado -eq "ACTIVO") { "Info" } else { "Warning" }
+                $script:notifyIcon.ShowBalloonTip(6000, "DefenderTray", $mensaje, $tipo)
+            } catch { }
+        }
+    } catch {
+        $mensajeError = "Error al activar Defender: $($_.Exception.Message)"
+        Write-AppLog $mensajeError "ERROR"
+        if ($null -ne $script:notifyIcon) {
+            try { $script:notifyIcon.ShowBalloonTip(6000, "DefenderTray", $mensajeError, "Error") } catch { }
+        } elseif (-not $script:SilentMode) {
+            [System.Windows.Forms.MessageBox]::Show($mensajeError,"DefenderTray","OK","Error") | Out-Null
+        }
+    } finally {
+        $script:IsBusy = $false
+        Stop-ActionTimer | Out-Null
+        if ($null -ne $script:PanelForm -and -not $script:PanelForm.IsDisposed) { Set-PanelBusy $false }
+    }
+}
+
 # ============================================================================
 # SECCION 37 - BACKUP NUBE
 # ============================================================================
@@ -4273,10 +4331,10 @@ function Update-PanelStatusUI {
         $script:PanelLblValor.Text = "PROTECCION PARCIAL"
         $script:PanelLblValor.ForeColor = $script:Colors.Warn
         if ($s.HasPolicy -or $s.ServicesDisabled) {
-            $script:PanelLblDet1.Text = "Pulsa UN CLIC para TERMINAR DE DESACTIVAR (completo)."
+            $script:PanelLblDet1.Text = "Usa ACTIVAR para restaurar o UN CLIC para seguir desactivando."
             Set-ToggleButtonLook -Modo "FinishOff"
         } else {
-            $script:PanelLblDet1.Text = "Pulsa UN CLIC para TERMINAR DE ACTIVAR (completo)."
+            $script:PanelLblDet1.Text = "Usa ACTIVAR para restaurar o UN CLIC para terminar de activar."
             Set-ToggleButtonLook -Modo "FinishOn"
         }
         $script:PanelLblDet2.Text = $diag
@@ -4366,21 +4424,7 @@ function Show-DefenderPanel {
     $miAlternar = New-Object System.Windows.Forms.ToolStripMenuItem; $miAlternar.Text = "Alternar ON/OFF (1 clic)"
     $miAlternar.Add_Click({ Invoke-ToggleProtection })
     $miAct = New-Object System.Windows.Forms.ToolStripMenuItem; $miAct.Text = "Activar"
-    $miAct.Add_Click({
-        if (-not (Test-Admin)) { return }
-        try {
-            $script:IsBusy = $true; Set-PanelBusy $true
-            Start-ActionTimer; $script:LastActionName = "Activar"
-            [System.Windows.Forms.Application]::DoEvents()
-            $log = Enable-Defender
-            $elapsed = Get-ActionElapsedSeconds
-            $script:LastActionTime = $elapsed; Stop-ActionTimer | Out-Null
-            $script:IsBusy = $false; Set-PanelBusy $false
-            Update-PanelStatusUI
-            $s = Get-QuickStatus
-            Add-HistoryDB -Accion "Activar" -Resultado $s.Estado -Segundos $elapsed
-        } finally { $script:IsBusy = $false; Stop-ActionTimer | Out-Null; Set-PanelBusy $false }
-    })
+    $miAct.Add_Click({ Invoke-EnableProtection -Accion "Activar" })
     $miDes = New-Object System.Windows.Forms.ToolStripMenuItem; $miDes.Text = "Desactivar"
     $miDes.Add_Click({
         if (-not (Test-Admin)) { return }
@@ -4530,15 +4574,16 @@ function Show-DefenderPanel {
 
     $btnDiagnostico = New-NeonButton (T "Diagnostico")  $script:Colors.AccentPurple $script:Colors.AccentPurpH  15  245 470 32
     $btnToggle      = New-NeonButton (T "ToggleDisable") $script:Colors.AccentRed    $script:Colors.AccentRedH   15  282 470 42
-    $btnReparar     = New-NeonButton (T "Reparar")      $script:Colors.AccentAmber  $script:Colors.AccentAmberH 15  325 470 36
-    $btnEmerg       = New-NeonButton (T "Emergencia")   $script:Colors.AccentRed    $script:Colors.AccentRedH   15  370 230 32
-    $btnEventos     = New-NeonButton "Event Log"        $script:Colors.AccentPurple $script:Colors.AccentPurpH  255 370 230 32
-    $btnHistorial   = New-NeonButton (T "Historial")    $script:Colors.AccentBlue   $script:Colors.AccentBlueH  15  410 110 32
-    $btnConfig      = New-NeonButton (T "Config")       $script:Colors.AccentBlue   $script:Colors.AccentBlueH  135 410 110 32
-    $btnAyuda       = New-NeonButton (T "Ayuda")        $script:Colors.AccentBlue   $script:Colors.AccentBlueH  255 410 110 32
-    $btnSalir       = New-NeonButton (T "Salir")        $script:Colors.AccentRed    $script:Colors.AccentRedH   375 410 110 32
+    $btnActivate    = New-NeonButton (T "Activar")       $script:Colors.AccentGreen  $script:Colors.AccentGreenH 15  327 470 36
+    $btnReparar     = New-NeonButton (T "Reparar")      $script:Colors.AccentAmber  $script:Colors.AccentAmberH 15  368 470 36
+    $btnEmerg       = New-NeonButton (T "Emergencia")   $script:Colors.AccentRed    $script:Colors.AccentRedH   15  409 230 32
+    $btnEventos     = New-NeonButton "Event Log"        $script:Colors.AccentPurple $script:Colors.AccentPurpH  255 409 230 32
+    $btnHistorial   = New-NeonButton (T "Historial")    $script:Colors.AccentBlue   $script:Colors.AccentBlueH  15  448 110 32
+    $btnConfig      = New-NeonButton (T "Config")       $script:Colors.AccentBlue   $script:Colors.AccentBlueH  135 448 110 32
+    $btnAyuda       = New-NeonButton (T "Ayuda")        $script:Colors.AccentBlue   $script:Colors.AccentBlueH  255 448 110 32
+    $btnSalir       = New-NeonButton (T "Salir")        $script:Colors.AccentRed    $script:Colors.AccentRedH   375 448 110 32
 
-    $script:PanelAllButtons = @($btnDiagnostico,$btnToggle,$btnReparar,$btnEmerg,$btnEventos,$btnHistorial,$btnConfig,$btnAyuda,$btnSalir)
+    $script:PanelAllButtons = @($btnDiagnostico,$btnToggle,$btnActivate,$btnReparar,$btnEmerg,$btnEventos,$btnHistorial,$btnConfig,$btnAyuda,$btnSalir)
     foreach ($b in $script:PanelAllButtons) { $form.Controls.Add($b) }
 
     $statusStrip = New-Object System.Windows.Forms.StatusStrip
@@ -4590,6 +4635,7 @@ function Show-DefenderPanel {
     $btnConfig.Add_Click({ Show-SettingsDialog })
     $btnEventos.Add_Click({ Show-EventLogDialog })
     $btnEmerg.Add_Click({ Invoke-EmergencyActivation })
+    $btnActivate.Add_Click({ Invoke-EnableProtection -Accion "Activar" })
 
     $btnToggle.Add_Click({ Invoke-ToggleProtection })
 
@@ -5010,11 +5056,7 @@ $miToggle = Add-MenuItem "UN CLIC: Activar/Desactivar" { Invoke-ToggleProtection
 [void]$menu.Items.Add((New-Object System.Windows.Forms.ToolStripSeparator))
 
 $miAct = Add-MenuItem "Activar Defender" {
-    if (-not (Test-Admin)) { return }
-    $null = Enable-Defender
-    $s = Get-QuickStatus
-    Add-HistoryDB -Accion "Activar (menu)" -Resultado $s.Estado -Segundos 0
-    Update-TrayIcon -Estado $s.Estado
+    Invoke-EnableProtection -Accion "Activar (menu)"
 }
 $miDes = Add-MenuItem "Desactivar Defender" {
     if (-not (Test-Admin)) { return }
