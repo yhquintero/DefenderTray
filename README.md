@@ -11,7 +11,7 @@
 [![Versión](https://img.shields.io/badge/versi%C3%B3n-8.2%20ULTIMATE-4f46e5?style=flat-square)](versiones/8/DefenderTray_8.2_Pro.ps1)
 [![PowerShell](https://img.shields.io/badge/PowerShell-5.1%2B-012456?style=flat-square&logo=powershell&logoColor=white)](#-requisitos)
 [![Plataforma](https://img.shields.io/badge/Windows-10%20%C2%B7%2011%20%C2%B7%20Server-0078D4?style=flat-square&logo=windows&logoColor=white)](#-requisitos)
-[![Un solo archivo](https://img.shields.io/badge/un%20solo%20archivo-5%20119%20l%C3%ADneas-059669?style=flat-square)](versiones/8/DefenderTray_8.2_Pro.ps1)
+[![Un solo archivo](https://img.shields.io/badge/un%20solo%20archivo-4777%20l%C3%ADneas-059669?style=flat-square)](versiones/8/DefenderTray_8.2_Pro.ps1)
 [![API local](https://img.shields.io/badge/API%20local-REST%20%C2%B7%20GraphQL%20%C2%B7%20SSE%20%C2%B7%20PWA-1e1b4b?style=flat-square)](#-api-local)
 [![Licencia](https://img.shields.io/badge/licencia-propietaria-475569?style=flat-square)](LICENSE)
 [![Seguridad](https://img.shields.io/badge/seguridad-pol%C3%ADtica%20publicada-FF3366?style=flat-square)](SECURITY.md)
@@ -30,7 +30,9 @@
 
 **DefenderTray** es un **único script de PowerShell** (sin instalador, sin dependencias obligatorias, sin servicios de terceros) que pone el control de Microsoft Defender en la bandeja del sistema: un icono que cambia de color según el estado real del motor, un panel con botones grandes y un historial de cada acción.
 
-Lo que hace difícil a mano —detener `WinDefend`, dejar los servicios en `Start=4`, limpiar las claves de `Real-Time Protection`, aguantar que Windows 11 los reviva desde el kernel, acordarse de exportar el registro antes y poder revertirlo todo después— aquí son **un clic con verificación posterior y respaldo del registro incluido**.
+El control **Activar / Desactivar** cambia la protección en tiempo real, **sin detener el motor, matar el actualizador ni borrar bases de firmas**. Windows puede reactivar automáticamente una pausa. El resultado se verifica con el proveedor de Defender; si está bloqueado o no se puede consultar, se informa sin inventar un éxito.
+
+> **Corrección de firmas en 8.2:** los botones vuelven a estar uno junto al otro. ACTIVO deshabilita Activar y permite Desactivar; una pausa hace lo contrario. Si aparece `0.0.0.0`, pulsa **Activar** y después **Reparar Firmas** para intentar descargar la inteligencia desde tu fuente configurada, sin borrar la base existente. Esta modificación del código no repara automáticamente tu equipo. Consulta las [pruebas y pasos de recuperación](tests/README.md).
 
 A partir de la rama 8.x el proyecto dejó de ser un simple *toggle* y añade una capa de **operaciones**: API REST/GraphQL local, panel web en tiempo real (SSE), PWA instalable, firma de reportes, exportación a Excel/CSV y PDF, alertas por Telegram, Firebase, SMTP y webhooks, modo auditoría, modo forense, agente residente por WMI y detección de anomalías.
 
@@ -41,8 +43,8 @@ A partir de la rama 8.x el proyecto dejó de ser un simple *toggle* y añade una
 | Pieza | Para qué sirve |
 |---|---|
 | 🟢 **Icono en la bandeja** | Estado en un color (verde *activo*, rojo *desactivado*, ámbar *parcial*), menú con las acciones frecuentes y notificaciones al terminar cada operación. |
-| 🎛️ **Panel principal** | Diagnóstico, botón verde **ACTIVAR PROTECCIÓN** siempre visible, **interruptor UN CLIC** para la acción contextual, Reparación profunda, **EMERGENCIA** (reactivación de un clic), Event Log, Historial, Config, Ayuda y Salir. Tema oscuro/claro automático, paleta personalizable y apertura en el monitor activo. |
-| 🧬 **Motor de activación/desactivación** | Secuencia de 10-11 pasos ordenada por dependencias, bucle de reintento (hasta 5) y verificación final; respaldo `.reg` de las políticas antes de tocar nada. Las preferencias `Set-MpPreference` se aplican de verdad (splatting por nombre; en ≤8.1 fallaban todas en silencio). |
+| 🎛️ **Panel principal** | Diagnóstico, **ACTIVAR PROTECCIÓN** y **DESACTIVAR PROTECCIÓN** adyacentes y habilitados según el estado confirmado, Reparación profunda, **EMERGENCIA** (reactivación de un clic), Event Log, Historial, Config, Ayuda y Salir. Tema oscuro/claro automático, paleta personalizable y apertura en el monitor activo. |
+| 🧬 **Motor de activación/desactivación** | Pausa/activación de tiempo real con `Set-MpPreference` y comprobación del estado real. No fuerza servicios ni procesos; recupera bloqueos heredados selectivamente con respaldo previo de políticas. |
 | 🩺 **Diagnóstico y reparación** | Informe por capítulos (servicios, drivers, políticas, firmas, red, AV de terceros, Event Log), reparación de firmas corruptas (errores 31/12/1969), `sfc /scannow`, `DISM /RestoreHealth`, `gpupdate` y limpieza de políticas huérfanas. |
 | 🗄️ **Historial y datos** | SQLite cifrado cuando el proveedor está disponible y JSON como respaldo: cada acción queda registrada con resultado y duración; exportación a CSV/Excel y estadísticas. |
 | 🌐 **API local** | `HttpListener` en `127.0.0.1:9182` con REST, un subconjunto GraphQL, `SSE` para el panel en vivo, consola Fleet y PWA instalable. HTTP o HTTPS con certificado autofirmado. |
@@ -93,7 +95,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\DefenderTray_8.2_Pro.ps1
 powershell -NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File .\DefenderTray_8.2_Pro.ps1 -silent -norest
 ```
 
-**Antes de desactivar en Windows 11:** la *Protección frente a manipulaciones* (Tamper Protection) sigue siendo lo único que Windows no deja tocar desde fuera. Desde la **v8.2** DefenderTray ya no se detiene: aplica todo lo que se pueda (lo persistente se conserva) y, si Tamper Protection bloquea el resto, te guía con un botón para abrir *Seguridad de Windows → Protección contra virus y amenazas → Configuración → Protección frente a manipulaciones* y desactivarla. Después puede exigir un **reinicio** para que el estado quede consistente: la herramienta lo indica explícitamente («reinicio pendiente»), sin dejarlo como estado parcial.
+**Antes de desactivar en Windows 11:** la *Protección frente a manipulaciones* o las políticas de una organización pueden impedir el cambio. DefenderTray no fuerza el cierre de procesos ni cambia Tamper Protection por registro: informa del bloqueo. No modifiques políticas corporativas sin autorización. Una instalación afectada por versiones antiguas puede requerir recuperación selectiva y reinicio antes de recuperar el estado normal.
 
 Para arrancarlo con doble clic, crea un acceso directo con este destino:
 
@@ -174,7 +176,7 @@ light.exe  -nologo -ext WixUIExtension -o DefenderTray_v8.2.msi DefenderTray.wix
 
 ### Reparación profunda
 
-Consola con acciones numeradas: **1. Borrar políticas**, **2. Servicios**, **3. `gpupdate`**, **4. `sfc /scannow`**, **5. `DISM /RestoreHealth`**, **Matar `MsMpEng`**, **Reparar firmas**, **Reparar todo**, **AD Inventory** y **Guía de certificados**. Cada comando se ejecuta a la vista en la propia consola, para que puedas leer la salida en lugar de confiar en un «hecho».
+Consola con recuperación selectiva de bloqueos, servicios, `gpupdate`, `sfc /scannow`, `DISM /RestoreHealth`, apertura de Seguridad de Windows, actualización no destructiva de firmas, AD Inventory y guía de certificados. Ya no ofrece matar `MsMpEng` ni borrar ramas completas de políticas. Las herramientas administrativas independientes no forman parte del ciclo Activar/Desactivar.
 
 ### Programador y «servicio»
 
@@ -247,7 +249,7 @@ El código vive en [`versiones/`](versiones/), una carpeta por hito. Esta es la 
 
 | Versión | Archivo | Qué aportó |
 |---|---|---|
-| **8.2 ULTIMATE** ⭐ | [`versiones/8/DefenderTray_8.2_Pro.ps1`](versiones/8/DefenderTray_8.2_Pro.ps1) | Actual **y recomendada**. Botón directo **ACTIVAR PROTECCIÓN** siempre visible, incluso en estado `PARCIAL`, junto al interruptor contextual **UN CLIC**; fix crítico de `Set-MpPreference`, restauración de servicios y protecciones con verificación, Tamper Protection guiada y estado `DESACTIVADO` con aviso de reinicio pendiente. Hereda todo lo de la 8.1. |
+| **8.2 ULTIMATE** ⭐ | [`versiones/8/DefenderTray_8.2_Pro.ps1`](versiones/8/DefenderTray_8.2_Pro.ps1) | Actual **y recomendada**. Botones **Activar / Desactivar** adyacentes y según estado real; pausa de tiempo real conservando motor y firmas, recuperación selectiva de bloqueos antiguos y actualización no destructiva de inteligencia. Hereda todo lo de la 8.1. |
 | 8.1 ULTIMATE | [`versiones/8/DefenderTray_8.1_Pro.ps1`](versiones/8/DefenderTray_8.1_Pro.ps1) | SQLite cifrado, firma Authenticode + guía EV, MSI con WiX, FCM v1, consola Fleet, anomalías por Z-score, Active Directory, GraphQL, PWA, kiosco biométrico, webhooks, Excel/CSV, panel SSE, autoactualización con SHA256 y empaquetado Docker. *Nota honesta:* v8.1 es **el mismo código que v8.0** con las cadenas de versión actualizadas (142 líneas, todas de texto). |
 | 8.0 ULTIMATE | [`versiones/8/DefenderTray_8.0_Pro.ps1`](versiones/8/DefenderTray_8.0_Pro.ps1) | Salto a «Enterprise Security Control»: las 15 funciones anteriores. |
 | 7.0 ULTIMATE | [`versiones/7/DefenderTray_7.0_Pro.ps1`](versiones/7/DefenderTray_7.0_Pro.ps1) | Panel web servido por la API, perfiles, Telegram, auto-reparación heurística, voz, PDF firmado, botón de pánico, Event Log, nube, multi-monitor, tema editable, tutela, modo forense. |
@@ -277,11 +279,11 @@ El código vive en [`versiones/`](versiones/), una carpeta por hito. Esta es la 
 
 | Síntoma | Causa habitual | Qué hacer |
 |---|---|---|
-| `[!] Tamper Protection ACTIVA` en el log | La protección frente a manipulaciones bloquea los cambios. | La v8.2 aplica igualmente todo lo persistente y te ofrece abrir *Seguridad de Windows* con un botón: desactiva *Protección frente a manipulaciones* y pulsa el interruptor una vez más (un solo clic). |
+| `[!] Tamper Protection ACTIVA` en el log | La protección frente a manipulaciones bloquea los cambios. | La v8.2 informa del rechazo sin forzar servicios ni procesos. Revisa Seguridad de Windows y las políticas del administrador. |
 | `[!] DESACTIVACION INCOMPLETA` | GPO de dominio, tarea de remediación o Tamper Protection revirtiendo valores. | Revisa el log del resultado; con `-audit` verás las claves en juego. En dominio, la política de grupo manda sobre este script. |
 | Doble clic y se cierra al instante | Política de ejecución o falta de administración. | Ejecuta con `-ExecutionPolicy Bypass` desde una PowerShell elevada y revisa `Logs\`. |
 | `Start=4: PENDIENTE` | GPO de dominio o una tarea de remediación revierte el valor. | Con `-audit` verás las claves en juego; en dominio, se resuelve con la GPO, no con este script. |
-| «Reparación de firmas» no termina (errores 31 / 12 / 1969) | Base de firmas corrupta o `WinDefend` detenido. | Usa **REPARAR FIRMAS** y después **REPARAR TODO**; si persiste, `MpCmdRun.exe -RemovalEntries` y actualizar desde *Seguridad de Windows*. |
+| «Reparación de firmas» no termina (errores 31 / 12 / 1969) | Base de firmas corrupta o `WinDefend` detenido. | Pulsa **Activar** si el motor quedó bloqueado por una versión anterior y después **Reparar Firmas**. Si falla, revisa el log, la red y Seguridad de Windows; no borres definiciones para reintentar. |
 | `REST no arranco` o el puerto está ocupado | Otro proceso escucha en 9182 o falta la reserva `urlacl`. | Cambia el puerto en Configuración, arranca con `-norest`, o revisa las reservas con `netsh http show urlacl` y libera la antigua con `netsh http delete urlacl`.  |
 | No se ven los gráficos / el tema sale raro en PowerShell 7 | Ensamblados dependientes de .NET Framework. | Ejecuta con `powershell.exe` (5.1) en lugar de `pwsh`. |
 | «No se pudo cargar SQLite» | Sin salida a Internet o sin permisos en `lib\`. | Copia manualmente las dos DLL, o ignóralo: el historial pasa a JSON sin perder funciones. |
@@ -325,7 +327,7 @@ CHANGELOG.md · README.md · CONTRIBUTING.md · LICENSE · SECURITY.md
 .gitattributes · .gitignore
 ```
 
-Es un repositorio de **un solo archivo ejecutable por versión**: no hay árbol `src/`, ni compilación, ni gestores de paquetes. Cada `.ps1` es autónomo y autocontenido (66 secciones y 142 funciones en la v8.2), lo que facilita copiarlo a un equipo aislado y lo que hace que el tamaño llame la atención. Los archivos con sufijos `.backup_*`, `- copia - copia` y el marcador `revisar` son residuos del desarrollo histórico: no los uses como referencia, toma siempre la v8.2. Se listan y explican en [CHANGELOG.md](CHANGELOG.md#-pendientes-de-limpieza-registrados), y [`.gitignore`](.gitignore) ya impide que se generen otros nuevos.
+Es un repositorio de **un solo archivo ejecutable por versión**: no hay árbol `src/`, ni compilación, ni gestores de paquetes. Cada `.ps1` es autónomo y autocontenido (145 funciones en la v8.2), lo que facilita copiarlo a un equipo aislado y lo que hace que el tamaño llame la atención. Los archivos con sufijos `.backup_*`, `- copia - copia` y el marcador `revisar` son residuos del desarrollo histórico: no los uses como referencia, toma siempre la v8.2. Se listan y explican en [CHANGELOG.md](CHANGELOG.md#-pendientes-de-limpieza-registrados), y [`.gitignore`](.gitignore) ya impide que se generen otros nuevos.
 
 ## ❓ Preguntas frecuentes
 
@@ -443,7 +445,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\DefenderTray_8.2_Pro.ps1 -
 powershell -NoProfile -ExecutionPolicy Bypass -File .\DefenderTray_8.2_Pro.ps1           # interactive panel
 ```
 
-On Windows 11, turn **Tamper Protection** off first if you want a full disable in one go: while it is on, Windows blocks the changes — since v8.2 the tool still applies everything that persists and offers a button to open Windows Security, and an incomplete disable needs a reboot to settle (reported as «pending reboot», not as partial).
+On Windows 11, Tamper Protection or managed policies may reject a change. The corrected v8.2 pauses real-time protection only, leaves the engine and updater running, and never deletes definitions when updating signatures. Enable/Disable buttons are side by side and follow the confirmed provider state. Legacy service blocks may need recovery and a reboot. See the [safe test and recovery protocol](tests/README.md).
 
 **Switches.** `-silent` (no dialogs), `-portable` (data next to the script), `-audit` (log only, apply nothing), `-norest` (no local API), `-https` (self-signed TLS), `-action enable|disable`, `-autoupdate`, `-noelevate` (do not ask for elevation).
 
@@ -455,7 +457,7 @@ On Windows 11, turn **Tamper Protection** off first if you want a full disable i
 
 **Privacy.** Nothing leaves the machine unless you configure Telegram, Firebase Cloud Messaging, SMTP, webhooks or the GitHub update check. Settings are stored DPAPI-encrypted (current user) in `%LOCALAPPDATA%\DefenderTray\config.dat`; forensic screenshots are **not** encrypted.
 
-**Status of features.** v8.2 is the reference build: one-click full enable/disable (no confirmation dialogs) and the `Set-MpPreference` fix that used to leave protections half applied. Note that multi-machine fleet support is a local skeleton rather than a central server, and that voice control is a stub. Read [SECURITY.md](SECURITY.md) for the honest list of known limits and mitigations, [CONTRIBUTING.md](CONTRIBUTING.md) for conventions and safe testing, [CHANGELOG.md](CHANGELOG.md) for the version history, and [LICENSE](LICENSE) for terms. Continuous integration (`.github/workflows/ci.yml`) checks PowerShell syntax, file encoding and documentation links without ever running the tool.
+**Status of features.** v8.2 is the reference build: verified real-time enable/pause, non-destructive signature updates and state-aware adjacent buttons. Note that multi-machine fleet support is a local skeleton rather than a central server, and that voice control is a stub. Read [SECURITY.md](SECURITY.md) for the honest list of known limits and mitigations, [CONTRIBUTING.md](CONTRIBUTING.md) for conventions and safe testing, [CHANGELOG.md](CHANGELOG.md) for the version history, and [LICENSE](LICENSE) for terms. Continuous integration (`.github/workflows/ci.yml`) checks PowerShell syntax, file encoding and documentation links without ever running the tool.
 
 ---
 

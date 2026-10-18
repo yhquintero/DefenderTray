@@ -2,28 +2,19 @@
 ================================================================================
   DefenderTray v8.2 ULTIMATE - Enterprise Security Control
 ================================================================================
-  Novedades v8.2 sobre v8.1:
-    1.  UN SOLO CLIC: interruptor unico ACTIVAR/DESACTIVAR en el panel, en el
-        menu de bandeja y en la CLI. Sin dialogo de confirmacion y sin dialogo
-        modal de resultado: la accion COMPLETA se ejecuta con un unico clic.
-    2.  Desactivacion TOTAL, no parcial. Fix critico: en v8.1 TODAS las
-        llamadas a Set-MpPreference fallaban en silencio (se pasaba un
-        hashtable como parametro posicional y se usaba -Force, parametro que
-        el cmdlet no tiene), asi que las 15+ protecciones nunca se aplicaban.
-        Ahora se aplican de verdad con splatting por nombre.
-    3.  Activacion TOTAL, no parcial: mismo fix + verificacion con reintentos
-        hasta que la Proteccion en tiempo real quede ACTIVADA.
-    4.  Tamper Protection ya no aborta la desactivacion: se intenta bajar por
-        registro y, si Windows lo impide, se aplica todo lo persistente y se
-        guia con un boton para abrir Seguridad de Windows.
-    5.  Estado real: con politicas + servicios deshabilitados se reporta
-        DESACTIVADO (con detalle "reinicio pendiente" si hace falta), no
-        PARCIAL. PARCIAL queda reservado para estados a medio hacer.
-    6.  Politicas completas en ambos sentidos: Network Protection, PUA,
-        SmartScreen, Exploit Guard y claves RTP del registro.
-    7.  CLI: -action toggle ademas de enable/disable.
-    8.  ACTIVAR PROTECCION siempre visible en el panel, incluso en estado
-        PARCIAL; llama directamente a Enable-Defender y actualiza el estado.
+  Correcciones de proteccion y firmas:
+    1. ACTIVAR y DESACTIVAR vuelven a estar uno junto al otro.
+    2. ACTIVO: activar deshabilitado, desactivar habilitado. Pausado: inverso.
+       PARCIAL/desconocido: solo recuperar proteccion. Ocupado: ambos bloqueados.
+    3. Desactivar pausa solo tiempo real mediante Set-MpPreference; NO mata
+       procesos, detiene servicios ni cambia controladores o actualizaciones.
+    4. Activar recupera bloqueos antiguos selectivamente sin borrar ramas de
+       politicas, reiniciar el motor ni tocar Signature Updates.
+    5. Reparar Firmas actualiza sin RemoveDefinitions ni parametros invalidos.
+       Si la descarga falla, se conservan las bases existentes.
+    6. El estado se confirma con Get-MpComputerStatus. Un error o un cambio
+       bloqueado por Windows se informa, nunca se declara exito por intencion.
+    7. CLI: -action toggle ademas de enable/disable; usa el mismo control seguro.
   Conserva TODAS las funciones de la v8.1 (SQLite cifrado, MSI con WiX, FCM,
   Fleet, ML, Active Directory, GraphQL, PWA, kiosco biometrico, webhooks,
   Excel/CSV, SSE, auto-update, Docker, etc.).
@@ -720,8 +711,10 @@ function Test-DefenderPolicyDisabled {
 }
 
 function Test-RTPDisabled {
-    foreach ($p in @("HKLM:\SOFTWARE\Policies\Microsoft\Windows Defender\Real-Time Protection",
-                     "HKLM:\SOFTWARE\Microsoft\Windows Defender\Real-Time Protection")) {
+    param([switch]$PolicyOnly)
+    $paths = @("HKLM:\SOFTWARE\Policies\Microsoft\Windows Defender\Real-Time Protection")
+    if (-not $PolicyOnly) { $paths += "HKLM:\SOFTWARE\Microsoft\Windows Defender\Real-Time Protection" }
+    foreach ($p in $paths) {
         if (Test-Path $p) {
             $v = Get-ItemProperty -Path $p -ErrorAction SilentlyContinue
             if ($null -ne $v -and $null -ne $v.DisableRealtimeMonitoring -and [int]$v.DisableRealtimeMonitoring -eq 1) { return $true }
@@ -741,28 +734,36 @@ function Test-DefenderServicesDisabled {
 function Get-QuickStatus {
     $svc = Get-Service -Name WinDefend -ErrorAction SilentlyContinue
     $running = ($null -ne $svc) -and ($svc.Status -eq 'Running')
-    $proc = Get-Process -Name MsMpEng -ErrorAction SilentlyContinue
-    $engineRunning = ($null -ne $proc)
-    $rtpDisabled = Test-RTPDisabled
+    $engineRunning = ($null -ne (Get-Process -Name MsMpEng -ErrorAction SilentlyContinue))
     $hasPolicy = Test-DefenderPolicyDisabled
     $servicesDisabled = Test-DefenderServicesDisabled
-    $isActive = $running -and $engineRunning -and (-not $rtpDisabled) -and (-not $hasPolicy)
-    $isFullyDisabled = (-not $running) -and (-not $engineRunning)
-    # v8.2: politicas + servicios deshabilitados = DESACTIVADO real (Windows lo
-    # hace efectivo en el arranque). Ya no se reporta como PARCIAL.
-    $isDisabledCommitted = $hasPolicy -and $servicesDisabled
+    # El registro expresa intencion, no confirma el estado real del antivirus.
+    # Sin respuesta del proveedor nunca inventar ACTIVO ni DESACTIVADO.
+    $known = $false; $rtp = $false; $av = $false
+    try {
+        $st = Get-MpComputerStatus -ErrorAction Stop
+        if ($null -ne $st -and $null -ne $st.RealTimeProtectionEnabled -and $null -ne $st.AntivirusEnabled) {
+            $known = $true
+            $rtp = [bool]$st.RealTimeProtectionEnabled
+            $av = [bool]$st.AntivirusEnabled
+        }
+    } catch { }
+    $isActive = $known -and $running -and $engineRunning -and $av -and $rtp -and (-not $hasPolicy)
     $estado = "PARCIAL"
     if ($isActive) { $estado = "ACTIVO" }
-    elseif ($isFullyDisabled -or $isDisabledCommitted) { $estado = "DESACTIVADO" }
+    elseif ($known -and $running -and $engineRunning -and $av -and (-not $rtp) -and (-not $hasPolicy)) {
+        $estado = "DESACTIVADO"
+    }
     return [PSCustomObject]@{
         ServiceRunning = $running
         EngineRunning = $engineRunning
-        RealTimeProtectionEnabled = -not $rtpDisabled
+        RealTimeProtectionEnabled = $rtp
+        StatusKnown = $known
         HasPolicy = $hasPolicy
         ServicesDisabled = $servicesDisabled
         IsActive = $isActive
-        IsFullyDisabled = $isFullyDisabled
-        PendingReboot = (($estado -eq "DESACTIVADO") -and (-not $isFullyDisabled))
+        IsFullyDisabled = $false
+        PendingReboot = $false
         Estado = $estado
     }
 }
@@ -2120,51 +2121,37 @@ function Center-FormOnActiveMonitor {
 # SECCION 36 - PANIC BUTTON / EMERGENCIA
 # ============================================================================
 function Invoke-EmergencyActivation {
-    Write-AppLog "=== MODO EMERGENCIA ACTIVADO ===" "WARN"
-    Send-AllNotifications -Mensaje "EMERGENCIA: Activando Defender desde boton de panico" -Severidad "emergency"
-    $log = Enable-Defender
-    $s = Get-QuickStatus
-    Add-HistoryDB -Accion "EMERGENCIA" -Resultado $s.Estado -Segundos 0
-    if (-not $script:SilentMode) {
-        Show-ResultDialog -Titulo "EMERGENCIA - Defender Activado" -Mensaje (Normalize-LineEndings $log) -Tipo "Success"
-    }
+    Invoke-EnableProtection -Accion "EMERGENCIA"
 }
 
 # ============================================================================
 # SECCION 36b - v8.2: INTERRUPTOR DE UN SOLO CLIC
 # ============================================================================
 function Get-ToggleAction {
-    # Decide el sentido del interruptor: "Activar" o "Desactivar".
     param($Estado)
     if ($null -eq $Estado) { $Estado = Get-QuickStatus }
-    if ($Estado.Estado -eq "DESACTIVADO") { return "Activar" }
-    if ($Estado.Estado -eq "PARCIAL") {
-        # Completar el sentido ya iniciado: si hay politicas o servicios
-        # deshabilitados, terminar de desactivar; si no, terminar de activar.
-        if ($Estado.HasPolicy -or $Estado.ServicesDisabled) { return "Desactivar" }
-        return "Activar"
-    }
-    return "Desactivar"
+    if ($Estado.Estado -eq "ACTIVO") { return "Desactivar" }
+    # Ante un estado parcial/desconocido, priorizar recuperar la proteccion.
+    return "Activar"
 }
 
 function Invoke-ToggleProtection {
-    # v8.2: TODO con un unico clic. Sin dialogo de confirmacion y sin dialogo
-    # modal de resultado (aviso por globo: cero clics extra). La operacion se
-    # ejecuta COMPLETA (desactivacion o activacion total, con reintentos).
+    param([ValidateSet("", "Activar", "Desactivar")][string]$Accion = "")
+    # Un clic para cambiar tiempo real; no forzar cierres ni borrar firmas.
     if (-not (Test-Admin)) {
         [System.Windows.Forms.MessageBox]::Show("Ejecuta como Administrador.","Permisos","OK","Warning") | Out-Null
         return
     }
     if ($script:IsBusy) { return }
     $s = Get-QuickStatus
-    $accion = Get-ToggleAction -Estado $s
+    if (-not $Accion) { $Accion = Get-ToggleAction -Estado $s }
     $script:IsBusy = $true
     try {
         Set-PanelBusy $true
         Start-ActionTimer; $script:LastActionName = "$accion (1 clic)"
         if ($null -ne $script:PanelForm -and -not $script:PanelForm.IsDisposed) {
-            if ($accion -eq "Desactivar") { $script:PanelLblDet1.Text = "Desactivando COMPLETO (1 clic)..." }
-            else { $script:PanelLblDet1.Text = "Activando COMPLETO (1 clic)..." }
+            if ($accion -eq "Desactivar") { $script:PanelLblDet1.Text = "Pausando tiempo real; conservando firmas..." }
+            else { $script:PanelLblDet1.Text = "Activando proteccion en tiempo real..." }
             $script:PanelLblDet1.ForeColor = $script:Colors.Warn
         }
         [System.Windows.Forms.Application]::DoEvents()
@@ -2177,12 +2164,10 @@ function Invoke-ToggleProtection {
         Update-PanelStatusUI
         Update-TrayIcon -Estado $s2.Estado
 
-        $msg = ("Estado: {0}. {1} completado en {2:N2}s." -f $s2.Estado, $accion, $elapsed)
-        if ($s2.PendingReboot) {
-            $msg = "$msg Cambios aplicados al 100%: REINICIA el equipo para hacerlos efectivos."
-        } elseif ($s2.Estado -eq "PARCIAL") {
-            $msg = "$msg Estado PARCIAL: consulta Diagnostico."
-        }
+        $objetivo = if ($accion -eq "Activar") { "ACTIVO" } else { "DESACTIVADO" }
+        $msg = "Estado: $($s2.Estado)."
+        if ($s2.Estado -eq $objetivo) { $msg += " $accion confirmado en {0:N2}s." -f $elapsed }
+        else { $msg += " Cambio NO confirmado. Revisa Diagnostico y Seguridad de Windows." }
         if ($null -ne $script:notifyIcon) {
             try {
                 $icono = "Warning"
@@ -2190,9 +2175,11 @@ function Invoke-ToggleProtection {
                 $script:notifyIcon.ShowBalloonTip(6000, "DefenderTray", $msg, $icono)
             } catch { }
         }
-        if (($accion -eq "Desactivar") -and (Test-TamperProtectionActive)) {
-            Show-TamperProtectionGuide -Contexto "Para desactivar Windows Defender al 100%"
+        if (($accion -eq "Desactivar") -and ($s2.Estado -ne "DESACTIVADO") -and (Test-TamperProtectionActive)) {
+            Show-TamperProtectionGuide -Contexto "Para pausar la proteccion en tiempo real"
         }
+    } catch {
+        Write-AppLog "Cambio de proteccion no completado: $($_.Exception.Message)" "ERROR"
     } finally {
         $script:IsBusy = $false
         Stop-ActionTimer | Out-Null
@@ -2351,6 +2338,7 @@ function New-NeonButton {
 function Set-NeonButtonState {
     param([System.Windows.Forms.Button]$Boton, [bool]$Habilitado)
     if ($null -eq $Boton) { return }
+    $Boton.Enabled = $Habilitado
     if ($Habilitado) {
         $Boton.BackColor = $Boton.Tag.Normal
         $Boton.ForeColor = [System.Drawing.Color]::White
@@ -2475,80 +2463,72 @@ function Restore-DefenderRegistry {
 }
 
 # ============================================================================
-# SECCION 43 - FAILURE ACTIONS
+# SECCION 43 - RESERVADA (NO SE ALTERAN FAILURE ACTIONS)
 # ============================================================================
-function Disable-ServiceFailureActions {
-    param([string]$ServiceName)
-    $regPath = "HKLM:\SYSTEM\CurrentControlSet\Services\$ServiceName"
-    try {
-        if (-not (Test-Path $regPath)) { return $false }
-        $empty = New-Object byte[] 20
-        Set-ItemProperty -Path $regPath -Name "FailureActions"  -Value $empty -Type Binary -Force -ErrorAction SilentlyContinue
-        Set-ItemProperty -Path $regPath -Name "ResetPeriod"     -Value 0     -Type DWord  -Force -ErrorAction SilentlyContinue
-        Set-ItemProperty -Path $regPath -Name "RestartDelay"    -Value 0     -Type DWord  -Force -ErrorAction SilentlyContinue
-        Set-ItemProperty -Path $regPath -Name "RestartAttempts" -Value 0     -Type DWord  -Force -ErrorAction SilentlyContinue
-        try { $null = & sc.exe failure $ServiceName reset= 0 actions= "" 2>&1 } catch { }
-        return $true
-    } catch { return $false }
-}
 
 # ============================================================================
 # SECCION 44 - REPARAR FIRMAS
 # ============================================================================
+function Test-DefenderSignaturesHealthy {
+    param($Status)
+    try {
+        $version = [version]$Status.AntivirusSignatureVersion
+        $date = [datetime]$Status.AntivirusSignatureLastUpdated
+        return ($version -gt [version]'0.0.0.0' -and $date.Year -ge 2000 -and
+                $Status.AntivirusSignatureAge -lt 65535)
+    } catch { return $false }
+}
+
 function Repair-DefenderSignatures {
     $log = New-Object System.Collections.ArrayList
-    [void]$log.Add("=== REPARACION DE FIRMAS ===")
-    [void]$log.Add("")
-    $mpCmd = "$env:ProgramFiles\Windows Defender\MpCmdRun.exe"
-    if (-not (Test-Path $mpCmd)) {
-        [void]$log.Add("[!] No se encontro MpCmdRun.exe")
-        return ($log -join "`r`n")
-    }
-    [void]$log.Add("[1/6] Deteniendo WinDefend...")
+    [void]$log.Add("=== ACTUALIZACION NO DESTRUCTIVA DE FIRMAS ===")
+    if ($script:AuditMode) { return "[AUDITORIA] No se actualizan ni modifican firmas." }
+    # Nunca borrar definiciones ni detener el motor: si falla la descarga,
+    # las bases existentes siguen disponibles. No cambiar fuentes/intervalos.
     try {
-        $null = & sc.exe stop WinDefend 2>&1
-        Stop-Service -Name WinDefend -Force -ErrorAction SilentlyContinue
-        Wait-WithDoEvents -Milliseconds 3000
-    } catch { }
-    [void]$log.Add("[2/6] Removiendo definiciones corruptas...")
-    try {
-        $out = & $mpCmd -RemoveDefinitions -All 2>&1 | Out-String
-        foreach ($linea in ($out -split "`r?`n")) {
-            if (-not [string]::IsNullOrWhiteSpace($linea)) { [void]$log.Add("       $linea") }
+        $svc = Get-Service -Name WinDefend -ErrorAction Stop
+        if ($svc.Status -ne 'Running') {
+            if ((Get-ServiceStartMode -Name WinDefend) -eq 'Disabled') {
+                throw "WinDefend deshabilitado por una version anterior. Pulsa ACTIVAR primero."
+            }
+            Start-Service -Name WinDefend -ErrorAction Stop
+            Wait-WithDoEvents -Milliseconds 2000
         }
-    } catch { }
-    [void]$log.Add("[3/6] Reiniciando WinDefend...")
-    try {
-        Start-Service -Name WinDefend -ErrorAction SilentlyContinue
-        $null = & sc.exe start WinDefend 2>&1
-        Wait-WithDoEvents -Milliseconds 5000
-    } catch { }
-    [void]$log.Add("[4/6] Descargando firmas...")
-    if (Get-Command Update-MpSignature -ErrorAction SilentlyContinue) {
-        try { Update-MpSignature -UpdateInterval 0 -ErrorAction SilentlyContinue } catch { }
-    }
-    Wait-WithDoEvents -Milliseconds 5000
-    [void]$log.Add("[5/6] Verificando...")
-    try {
+        if (Get-Command Update-MpSignature -ErrorAction SilentlyContinue) {
+            Update-MpSignature -ErrorAction Stop
+        } else {
+            $mpCmd = "$env:ProgramFiles\Windows Defender\MpCmdRun.exe"
+            if (-not (Test-Path $mpCmd)) { throw "No se encontro el actualizador de Defender." }
+            $out = & $mpCmd -SignatureUpdate 2>&1 | Out-String
+            $exitCode = $LASTEXITCODE
+            [void]$log.Add($out)
+            if ($exitCode -ne 0) { throw "MpCmdRun devolvio $exitCode." }
+        }
         $st = Get-MpComputerStatus -ErrorAction Stop
-        [void]$log.Add("       Version: $($st.AntivirusSignatureVersion)")
-        [void]$log.Add("       Edad: $($st.AntivirusSignatureAge) dias")
-        if ($st.AntivirusSignatureAge -le 30) { [void]$log.Add("[OK] Firmas reparadas.") }
-        else { [void]$log.Add("[!] Siguen antiguas.") }
-    } catch { }
+        [void]$log.Add("Version: $($st.AntivirusSignatureVersion); fecha: $($st.AntivirusSignatureLastUpdated)")
+        if ((Test-DefenderSignaturesHealthy -Status $st) -and $st.AntivirusSignatureAge -le 30) {
+            [void]$log.Add("[OK] Firmas disponibles y verificadas.")
+        } else {
+            [void]$log.Add("[!] Firmas ausentes o antiguas. Revisa la conexion y Seguridad de Windows.")
+        }
+    } catch {
+        [void]$log.Add("[!] Actualizacion NO completada: $($_.Exception.Message)")
+        [void]$log.Add("No se han eliminado las bases de firmas existentes.")
+    }
     return ($log -join "`r`n")
 }
 
 function Invoke-StartupAutoRepair {
-    if (-not $script:CfgAutoRepair) { return }
+    if (-not $script:CfgAutoRepair -or $script:AuditMode) { return }
     try {
-        if (Get-Command Get-MpComputerStatus -ErrorAction SilentlyContinue) {
-            $st = Get-MpComputerStatus -ErrorAction Stop
-            if ($st.AntivirusSignatureAge -gt 30 -or $st.AntivirusSignatureAge -eq 65535) {
-                $null = Repair-DefenderSignatures
-            }
+        # No reactivar automaticamente un motor parado ni tocar una pausa.
+        if ((Get-QuickStatus).Estado -ne "ACTIVO") { return }
+        $st = Get-MpComputerStatus -ErrorAction Stop
+        if ((-not (Test-DefenderSignaturesHealthy -Status $st)) -or $st.AntivirusSignatureAge -gt 30) {
+            $result = Repair-DefenderSignatures
+            Write-AppLog $result "INFO"
         }
-    } catch { }
+    } catch { Write-AppLog "No se pudo comprobar firmas: $($_.Exception.Message)" "WARN" }
 }
 
 # ============================================================================
@@ -2565,7 +2545,7 @@ function Set-MpPrefValue {
     param([string]$Nombre, $Valor)
     if (-not (Get-Command Set-MpPreference -ErrorAction SilentlyContinue)) { return $false }
     try {
-        $splat = @{ ErrorAction = "SilentlyContinue" }
+        $splat = @{ ErrorAction = "Stop" }
         $splat[$Nombre] = $Valor
         Set-MpPreference @splat
         return $true
@@ -2581,20 +2561,6 @@ function Test-TamperProtectionActive {
     return $false
 }
 
-function Disable-TamperProtectionBestEffort {
-    # Intenta bajar el flag por registro con los servicios detenidos. En varios
-    # builds Windows protege la clave (TrustedInstaller) y devuelve $false.
-    try {
-        $p = "HKLM:\SOFTWARE\Microsoft\Windows Defender\Features"
-        if (Test-Path $p) {
-            Set-ItemProperty -Path $p -Name "TamperProtection" -Value 0 -Type DWord -Force -ErrorAction Stop
-            Remove-ItemProperty -Path $p -Name "TamperProtectionSource" -Force -ErrorAction SilentlyContinue
-            return $true
-        }
-    } catch { }
-    return $false
-}
-
 function Show-TamperProtectionGuide {
     param([string]$Contexto = "Para completar la accion")
     $msg = "Tamper Protection (Proteccion contra manipulaciones) esta ACTIVA y Windows bloquea cambios en Defender.`r`n`r`n" +
@@ -2602,7 +2568,7 @@ function Show-TamperProtectionGuide {
            "  Seguridad de Windows > Proteccion antivirus y contra amenazas >`r`n" +
            "  Configuracion de proteccion antivirus y contra amenazas >`r`n" +
            "  Proteccion contra manipulaciones = DESACTIVADA`r`n`r`n" +
-           "Todo lo demas ya esta aplicado por DefenderTray y se conserva.`r`n" +
+           "No se fuerzan servicios ni se eliminan bases de firmas.`r`n" +
            "Tras desactivarla, vuelve a pulsar el boton (un solo clic).`r`n`r`n" +
            "Abrir Seguridad de Windows ahora?"
     $r = [System.Windows.Forms.MessageBox]::Show($msg, "Tamper Protection", "YesNo", "Warning")
@@ -2612,427 +2578,122 @@ function Show-TamperProtectionGuide {
 }
 
 # ============================================================================
-# SECCION 45 - DESACTIVAR DEFENDER (v8.2: TOTAL en una pasada)
+# SECCION 45 - PAUSA NO DESTRUCTIVA DE TIEMPO REAL
 # ============================================================================
 function Disable-Defender {
+    if ($script:AuditMode) { return "[AUDITORIA] No se aplican cambios." }
+    if ($script:CfgForensicMode) { Save-ForensicSnapshot -Contexto "Antes de pausar" }
     $log = New-Object System.Collections.ArrayList
-    $sw = [System.Diagnostics.Stopwatch]::StartNew()
-
-    if ($script:AuditMode) {
-        [void]$log.Add("[AUDITORIA] Modo auditoria. No se aplican cambios.")
-        return ($log -join "`r`n")
+    [void]$log.Add("=== PAUSAR PROTECCION EN TIEMPO REAL ===")
+    [void]$log.Add("Se conservan motor, servicios, controladores, politicas de actualizacion y bases de firmas.")
+    $before = Get-QuickStatus
+    if ($before.Estado -eq "DESACTIVADO") { return "[OK] Tiempo real ya pausado; no se aplican cambios." }
+    if ($before.Estado -ne "ACTIVO") {
+        return "[!] Estado parcial o desconocido. Pulsa ACTIVAR para recuperar Defender antes de pausar."
     }
-    if ($script:CfgForensicMode) { Save-ForensicSnapshot -Contexto "Antes de desactivar" }
-
-    # v8.2: Tamper Protection ya NO aborta la operacion: se intenta y se
-    # continua con todo lo demas (politicas y Start=4 persisten igualmente).
-    $tpActiva = Test-TamperProtectionActive
-    if ($tpActiva) {
-        [void]$log.Add("[!] Tamper Protection ACTIVA: Windows puede bloquear parte de la operacion.")
-        [void]$log.Add("    Se aplicara TODO lo posible; el resto se completa desactivandola y reiniciando.")
+    if (-not (Set-MpPrefValue -Nombre DisableRealtimeMonitoring -Valor $true)) {
+        [void]$log.Add("[!] Windows rechazo el cambio. No se forzaran servicios ni procesos.")
     }
-
-    $backupReg = Backup-DefenderRegistry
-    if ($backupReg) { [void]$log.Add("[0/11] Backup del registro: OK") }
-
-    [void]$log.Add("[1/11] Desactivando preferencias (Set-MpPreference, splatting)...")
-    $prefsOff = @("DisableRealtimeMonitoring","DisableBehaviorMonitoring","DisableIOAVProtection",
-                  "DisableScriptScanning","DisableBlockAtFirstSeen","DisableArchiveScanning",
-                  "DisableEmailScanning","DisableIntrusionPreventionSystem",
-                  "DisableRemovableDriveScanning","DisableScanningNetworkFiles",
-                  "DisableCatchupQuickScan","DisableCatchupFullScan","DisableRestorePoint")
-    $okPrefs = 0
-    foreach ($p in $prefsOff) { if (Set-MpPrefValue -Nombre $p -Valor $true) { $okPrefs++ } }
-    [void]$log.Add("       $okPrefs de $($prefsOff.Count) preferencias forzadas a OFF (v8.1: 0 por el bug)")
-    if (Get-Command Set-MpPreference -ErrorAction SilentlyContinue) {
-        try { Set-MpPreference -MAPSReporting Disabled -ErrorAction SilentlyContinue } catch { }
-        try { Set-MpPreference -SubmitSamplesConsent NeverSend -ErrorAction SilentlyContinue } catch { }
-        try { Set-MpPreference -PUAProtection Disabled -ErrorAction SilentlyContinue } catch { }
-        try { Set-MpPreference -EnableNetworkProtection Disabled -ErrorAction SilentlyContinue } catch { }
-    }
-
-    [void]$log.Add("[2/11] Limpiando politicas anteriores...")
-    foreach ($p in @("HKLM\SOFTWARE\Policies\Microsoft\Windows Defender",
-                     "HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies",
-                     "HKLM\SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Policies",
-                     "HKCU\Software\Microsoft\Windows\CurrentVersion\Policies")) {
-        try { $null = & reg.exe delete $p /f 2>&1 } catch { }
-    }
-
-    [void]$log.Add("[3/11] Estableciendo politicas de bloqueo (persisten tras reinicio)...")
-    $dp = "HKLM:\SOFTWARE\Policies\Microsoft\Windows Defender"
-    if (-not (Test-Path $dp)) { New-Item -Path $dp -Force | Out-Null }
-    Set-ItemProperty -Path $dp -Name "DisableAntiSpyware" -Value 1 -Type DWord -Force -ErrorAction SilentlyContinue
-    Set-ItemProperty -Path $dp -Name "DisableAntiVirus"   -Value 1 -Type DWord -Force -ErrorAction SilentlyContinue
-    Set-ItemProperty -Path $dp -Name "PUAProtection"      -Value 0 -Type DWord -Force -ErrorAction SilentlyContinue
-    $rtp = "$dp\Real-Time Protection"
-    if (-not (Test-Path $rtp)) { New-Item -Path $rtp -Force | Out-Null }
-    foreach ($v in @("DisableRealtimeMonitoring","DisableBehaviorMonitoring","DisableOnAccessProtection",
-                     "DisableScanOnRealtimeEnable","DisableIOAVProtection","DisableScriptScanning",
-                     "DisableRawWriteNotification","DisableAsyncScan")) {
-        Set-ItemProperty -Path $rtp -Name $v -Value 1 -Type DWord -Force -ErrorAction SilentlyContinue
-    }
-    $spynet = "$dp\Spynet"
-    if (-not (Test-Path $spynet)) { New-Item -Path $spynet -Force | Out-Null }
-    Set-ItemProperty -Path $spynet -Name "SpynetReporting" -Value 0 -Type DWord -Force -ErrorAction SilentlyContinue
-    Set-ItemProperty -Path $spynet -Name "SubmitSamplesConsent" -Value 2 -Type DWord -Force -ErrorAction SilentlyContinue
-    $eg = "$dp\Windows Defender Exploit Guard\Network Protection"
-    if (-not (Test-Path $eg)) { New-Item -Path $eg -Force | Out-Null }
-    Set-ItemProperty -Path $eg -Name "EnableNetworkProtection" -Value 0 -Type DWord -Force -ErrorAction SilentlyContinue
-    $ss = "HKLM:\SOFTWARE\Policies\Microsoft\Windows\System"
-    if (-not (Test-Path $ss)) { New-Item -Path $ss -Force | Out-Null }
-    Set-ItemProperty -Path $ss -Name "EnableSmartScreen" -Value 0 -Type DWord -Force -ErrorAction SilentlyContinue
-    Set-ItemProperty -Path $ss -Name "ShellSmartScreenLevel" -Value "Off" -Type String -Force -ErrorAction SilentlyContinue
-    [void]$log.Add("       AntiSpyware + RTP + Spynet + ExploitGuard + PUA + SmartScreen")
-
-    [void]$log.Add("[4/11] Deshabilitando FailureActions...")
-    $svcs = @("WinDefend","WdNisSvc","Sense","WdNisDrv","WdBoot","Wdfilter","SecurityHealthService","wscsvc")
-    $faCount = 0
-    foreach ($s in $svcs) { if (Disable-ServiceFailureActions -ServiceName $s) { $faCount++ } }
-    [void]$log.Add("       FailureActions deshabilitadas en $faCount servicios")
-
-    [void]$log.Add("[5/11] Bucle de desactivacion (max 5)...")
-    $maxIntentos = 5; $intento = 0; $exito = $false
-    while (-not $exito -and $intento -lt $maxIntentos) {
-        $intento++
-        [void]$log.Add("")
-        [void]$log.Add("=== INTENTO $intento de $maxIntentos ===")
-        [void]$log.Add("  [A] Matando procesos...")
-        foreach ($proc in @("MsMpEng.exe","NisSrv.exe","SecurityHealthService.exe",
-                            "SecurityHealthSystray.exe","MpCmdRun.exe","MpCopyAccelerator.exe")) {
-            try { $null = & taskkill.exe /F /IM $proc 2>&1 } catch { }
-        }
-        [void]$log.Add("  [B] Deteniendo servicios...")
-        foreach ($s in $svcs) {
-            try { $null = & sc.exe stop $s 2>&1; Stop-Service -Name $s -Force -ErrorAction SilentlyContinue } catch { }
-        }
-        [void]$log.Add("  [C] Start=4 en registro...")
-        foreach ($sp in @("HKLM:\SYSTEM\CurrentControlSet\Services\WinDefend",
-                          "HKLM:\SYSTEM\CurrentControlSet\Services\WdNisSvc",
-                          "HKLM:\SYSTEM\CurrentControlSet\Services\Sense",
-                          "HKLM:\SYSTEM\CurrentControlSet\Services\WdNisDrv",
-                          "HKLM:\SYSTEM\CurrentControlSet\Services\WdBoot",
-                          "HKLM:\SYSTEM\CurrentControlSet\Services\Wdfilter",
-                          "HKLM:\SYSTEM\CurrentControlSet\Services\SecurityHealthService",
-                          "HKLM:\SYSTEM\CurrentControlSet\Services\wscsvc")) {
-            try { if (Test-Path $sp) { Set-ItemProperty -Path $sp -Name "Start" -Value 4 -Type DWord -Force -ErrorAction SilentlyContinue } } catch { }
-        }
-        [void]$log.Add("  [D] sc.exe config disabled...")
-        foreach ($s in $svcs) { try { $null = & sc.exe config $s start= disabled 2>&1 } catch { } }
-        [void]$log.Add("  [E] Esperando 4s...")
-        Wait-WithDoEvents -Milliseconds 4000
-        $svcCheck = Get-Service -Name WinDefend -ErrorAction SilentlyContinue
-        $procCheck = Get-Process -Name MsMpEng -ErrorAction SilentlyContinue
-        $svcRunning = ($null -ne $svcCheck) -and ($svcCheck.Status -eq 'Running')
-        $procRunning = ($null -ne $procCheck)
-        if (-not $svcRunning -and -not $procRunning) {
-            $exito = $true
-            [void]$log.Add("  [OK] Exito en intento $intento")
-        } else {
-            [void]$log.Add("  [!] Reintentando...")
-            Wait-WithDoEvents -Milliseconds 2000
-        }
-    }
-
-    [void]$log.Add("[6/11] Intentando bajar Tamper Protection por registro...")
-    if ($tpActiva -or (Test-TamperProtectionActive)) {
-        if (Disable-TamperProtectionBestEffort) {
-            [void]$log.Add("       TamperProtection=0 aplicado en registro.")
-        } else {
-            [void]$log.Add("       Windows protege la clave: desactivala en Seguridad de Windows.")
-        }
+    Wait-WithDoEvents -Milliseconds 1000
+    $after = Get-QuickStatus
+    if ($after.Estado -eq "DESACTIVADO") {
+        [void]$log.Add("[OK] Tiempo real pausado. Las actualizaciones siguen disponibles; Windows puede reactivarlo automaticamente.")
     } else {
-        [void]$log.Add("       Tamper Protection ya estaba desactivada.")
+        [void]$log.Add("[!] Pausa NO confirmada. Revisa Tamper Protection o las politicas de tu organizacion.")
     }
-
-    [void]$log.Add("")
-    [void]$log.Add("[7/11] Verificacion final...")
-    $svcFin  = Get-Service -Name WinDefend -ErrorAction SilentlyContinue
-    $procFin = Get-Process -Name MsMpEng -ErrorAction SilentlyContinue
-    $svcOk = ($null -eq $svcFin) -or ($svcFin.Status -ne 'Running')
-    $procOk = ($null -eq $procFin)
-    $startOk = $true
-    foreach ($s in @("WinDefend","WdNisSvc","Sense")) {
-        if ((Get-ServiceStartMode -Name $s) -ne "Disabled") { $startOk = $false }
-    }
-    $policyOk = Test-DefenderPolicyDisabled
-
-    [void]$log.Add("")
-    [void]$log.Add("=== RESULTADO FINAL ===")
-    if ($svcOk) { [void]$log.Add("  WinDefend: DETENIDO") } else { [void]$log.Add("  WinDefend: AUN CORRIENDO") }
-    if ($procOk) { [void]$log.Add("  MsMpEng:   DETENIDO") } else { [void]$log.Add("  MsMpEng:   AUN CORRIENDO") }
-    if ($startOk) { [void]$log.Add("  Start=4:   APLICADO") } else { [void]$log.Add("  Start=4:   PENDIENTE") }
-    if ($policyOk) { [void]$log.Add("  Politicas: APLICADAS") } else { [void]$log.Add("  Politicas: PENDIENTES") }
-    [void]$log.Add("  Intentos:  $intento de $maxIntentos")
-
-    [void]$log.Add("")
-    $completoAhora = $svcOk -and $procOk -and $startOk -and $policyOk
-    $completoTrasReiniciar = $startOk -and $policyOk
-    if ($completoAhora) {
-        [void]$log.Add("[OK] DESACTIVACION COMPLETA. Defender esta 100% desactivado.")
-    } elseif ($completoTrasReiniciar) {
-        [void]$log.Add("[OK] DESACTIVACION APLICADA AL 100%. Windows la hace efectiva al REINICIAR.")
-        [void]$log.Add("     (Windows 11 22H2+ reactiva WinDefend desde el kernel hasta el reinicio.)")
-    } else {
-        [void]$log.Add("[!] DESACTIVACION INCOMPLETA.")
-        if ($tpActiva -and (Test-TamperProtectionActive)) {
-            [void]$log.Add("     Motivo: Tamper Protection ACTIVA.")
-            [void]$log.Add("     Desactivala en Seguridad de Windows y vuelve a pulsar UN CLIC.")
-        } else {
-            [void]$log.Add("     Revisa el log; puedes usar Reparacion Profunda.")
-        }
-    }
-
-    $sw.Stop()
-    [void]$log.Add("")
-    [void]$log.Add("[OK] Tiempo: {0:N2}s" -f $sw.Elapsed.TotalSeconds)
-    Send-AllNotifications -Mensaje "Defender desactivado. Estado: $((Get-QuickStatus).Estado)" -Severidad "warning" -Data @{ estado=(Get-QuickStatus).Estado }
-    if ($script:CfgCloudBackup) { Backup-ToCloud }
+    Write-AppLog ($log -join "`r`n") "INFO"
+    Send-AllNotifications -Mensaje "Tiempo real: $($after.Estado)" -Severidad "warning" -Data @{ estado=$after.Estado }
     return ($log -join "`r`n")
 }
 
 # ============================================================================
-# SECCION 46 - ACTIVAR DEFENDER (v8.2: TOTAL en una pasada)
+# SECCION 46 - ACTIVACION Y RECUPERACION SELECTIVA
 # ============================================================================
+function Restore-LegacyDefenderConfiguration {
+    if ($script:AuditMode) { return }
+    # Recuperacion de Start=4 y de los valores concretos de versiones previas.
+    # No borrar ramas completas: conservar Signature Updates, exclusiones,
+    # fuentes WSUS y cualquier otra politica ajena a esos antiguos bloqueos.
+    $dp = "HKLM:\SOFTWARE\Policies\Microsoft\Windows Defender"
+    $values = @{
+        $dp = @("DisableAntiSpyware", "DisableAntiVirus", "PUAProtection")
+        "$dp\Real-Time Protection" = @("DisableRealtimeMonitoring", "DisableBehaviorMonitoring",
+            "DisableOnAccessProtection", "DisableScanOnRealtimeEnable", "DisableIOAVProtection",
+            "DisableScriptScanning", "DisableRawWriteNotification", "DisableAsyncScan")
+        "$dp\Spynet" = @("SpynetReporting", "SubmitSamplesConsent")
+        "$dp\Windows Defender Exploit Guard\Network Protection" = @("EnableNetworkProtection")
+        "HKLM:\SOFTWARE\Policies\Microsoft\Windows\System" = @("EnableSmartScreen", "ShellSmartScreenLevel")
+        "HKLM:\SOFTWARE\Microsoft\Windows Defender\Real-Time Protection" = @("DisableRealtimeMonitoring",
+            "DisableBehaviorMonitoring", "DisableOnAccessProtection", "DisableScanOnRealtimeEnable",
+            "DisableIOAVProtection", "DisableScriptScanning", "DisableRawWriteNotification", "DisableAsyncScan")
+    }
+    foreach ($path in $values.Keys) {
+        if (-not (Test-Path $path)) { continue }
+        $props = Get-ItemProperty -Path $path -ErrorAction Stop
+        foreach ($name in $values[$path]) {
+            if ($null -ne $props.PSObject.Properties[$name]) {
+                Remove-ItemProperty -Path $path -Name $name -ErrorAction Stop
+            }
+        }
+    }
+    $starts = @{ WinDefend=2; WdNisSvc=3; Sense=3; SecurityHealthService=3; wscsvc=2; WdNisDrv=3; WdBoot=0; WdFilter=0 }
+    foreach ($name in $starts.Keys) {
+        if ((Get-ServiceStartMode -Name $name) -eq "Disabled") {
+            Set-ItemProperty -Path "HKLM:\SYSTEM\CurrentControlSet\Services\$name" -Name Start -Value $starts[$name] -Type DWord -ErrorAction Stop
+        }
+    }
+}
+
 function Enable-Defender {
-    $log = New-Object System.Collections.ArrayList
-    $sw = [System.Diagnostics.Stopwatch]::StartNew()
-
-    if ($script:AuditMode) {
-        [void]$log.Add("[AUDITORIA] Modo auditoria. No se aplican cambios.")
-        return ($log -join "`r`n")
-    }
+    if ($script:AuditMode) { return "[AUDITORIA] No se aplican cambios." }
     if ($script:CfgForensicMode) { Save-ForensicSnapshot -Contexto "Antes de activar" }
-
-    [void]$log.Add("[1/11] Configurando Start de cada servicio...")
-    $svcConfig = @(
-        @{N="WinDefend"; Start=2; Run=$true; Orden=1},
-        @{N="WdNisSvc"; Start=2; Run=$true; Orden=2},
-        @{N="Sense"; Start=2; Run=$true; Orden=3},
-        @{N="SecurityHealthService"; Start=2; Run=$true; Orden=4},
-        @{N="wscsvc"; Start=2; Run=$true; Orden=5},
-        @{N="WdNisDrv"; Start=1; Run=$false; Orden=6},
-        @{N="WdBoot"; Start=0; Run=$false; Orden=7},
-        @{N="Wdfilter"; Start=0; Run=$false; Orden=8}
-    )
-    foreach ($s in $svcConfig) {
-        $p = "HKLM:\SYSTEM\CurrentControlSet\Services\$($s.N)"
-        if (Test-Path $p) {
-            try {
-                Set-ItemProperty -Path $p -Name "Start" -Value $s.Start -Type DWord -Force -ErrorAction SilentlyContinue
-                $txtStart = "?"
-                if ($s.Start -eq 0) { $txtStart = "Boot" }
-                elseif ($s.Start -eq 1) { $txtStart = "System" }
-                elseif ($s.Start -eq 2) { $txtStart = "Automatic" }
-                elseif ($s.Start -eq 3) { $txtStart = "Manual" }
-                [void]$log.Add("       $($s.N) -> $txtStart")
-            } catch { }
-        }
-    }
-
-    [void]$log.Add("[2/11] Eliminando politicas de bloqueo...")
-    foreach ($rp in @("HKLM:\SOFTWARE\Policies\Microsoft\Windows Defender",
-                      "HKLM:\SOFTWARE\Policies\Microsoft\Windows Defender\Real-Time Protection",
-                      "HKLM:\SOFTWARE\Policies\Microsoft\Windows Defender\Spynet",
-                      "HKLM:\SOFTWARE\Policies\Microsoft\Windows Defender\NIS",
-                      "HKLM:\SOFTWARE\Policies\Microsoft\Windows Defender\Signature Updates")) {
-        try {
-            if (Test-Path $rp) {
-                Remove-Item -Path $rp -Recurse -Force -ErrorAction SilentlyContinue
-                [void]$log.Add("       Eliminado: $rp")
-            }
-        } catch { }
-    }
-    foreach ($rp in @("HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies",
-                      "HKLM:\SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Policies",
-                      "HKCU:\Software\Microsoft\Windows\CurrentVersion\Policies")) {
-        try {
-            if (Test-Path "$rp\Windows Defender") {
-                Remove-Item -Path "$rp\Windows Defender" -Recurse -Force -ErrorAction SilentlyContinue
-            }
-        } catch { }
-    }
-    $ss = "HKLM:\SOFTWARE\Policies\Microsoft\Windows\System"
-    if (Test-Path $ss) {
-        foreach ($n in @("EnableSmartScreen","ShellSmartScreenLevel")) {
-            try { Remove-ItemProperty -Path $ss -Name $n -Force -ErrorAction SilentlyContinue } catch { }
-        }
-        [void]$log.Add("       SmartScreen restaurado (valores de politica eliminados).")
-    }
-
-    [void]$log.Add("[3/11] Limpiando claves RTP...")
-    $rtWk = "HKLM:\SOFTWARE\Microsoft\Windows Defender\Real-Time Protection"
-    if (Test-Path $rtWk) {
-        foreach ($n in @("DisableRealtimeMonitoring","DisableBehaviorMonitoring","DisableOnAccessProtection",
-                         "DisableScanOnRealtimeEnable","DisableIOAVProtection","DisableScriptScanning",
-                         "DisableRawWriteNotification","DisableAsyncScan")) {
-            try { Remove-ItemProperty -Path $rtWk -Name $n -Force -ErrorAction SilentlyContinue } catch { }
-        }
-        [void]$log.Add("       Claves RTP limpiadas.")
-    }
-
-    [void]$log.Add("[4/11] Arrancando servicios por dependencias...")
-    $serviciosOrden = $svcConfig | Where-Object { $_.Run } | Sort-Object Orden
-    foreach ($s in $serviciosOrden) {
-        $nombre = $s.N
-        $running = $false
-        $intentos = 0
-        while (-not $running -and $intentos -lt 4) {
-            $intentos++
-            try {
-                $svc = Get-Service -Name $nombre -ErrorAction SilentlyContinue
-                if ($null -eq $svc) { break }
-                Set-Service -Name $nombre -StartupType Automatic -ErrorAction SilentlyContinue
-                $null = & sc.exe config $nombre start= auto 2>&1
-                if ($svc.Status -ne 'Running') {
-                    Start-Service -Name $nombre -ErrorAction SilentlyContinue
-                    $null = & sc.exe start $nombre 2>&1
-                }
-                Wait-WithDoEvents -Milliseconds 1500
-                $svc = Get-Service -Name $nombre -ErrorAction SilentlyContinue
-                if ($null -ne $svc -and $svc.Status -eq 'Running') {
-                    $running = $true
-                    [void]$log.Add("       [OK] $nombre CORRIENDO (intento $intentos)")
-                }
-            } catch { }
-        }
-        if (-not $running) {
-            $svcFinal = Get-Service -Name $nombre -ErrorAction SilentlyContinue
-            $est = if ($null -ne $svcFinal) { $svcFinal.Status } else { "NO EXISTE" }
-            [void]$log.Add("       [!] $nombre -> $est")
-        }
-    }
-
-    Wait-WithDoEvents -Milliseconds 2000
-
-    [void]$log.Add("[5/11] Reiniciando WinDefend...")
+    $log = New-Object System.Collections.ArrayList
+    [void]$log.Add("=== ACTIVAR PROTECCION (SIN BORRAR FIRMAS) ===")
     try {
-        $null = & sc.exe stop WinDefend 2>&1
+        $before = Get-QuickStatus
+        # Migracion solo si hay indicios de los bloqueos antiguos. Windows
+        # puede rechazarla: informar, nunca insistir matando el motor.
+        # Una pausa normal puede reflejarse en el registro local. No tratarla
+        # como una politica heredada ni exigir un backup para reactivarla.
+        $legacy = $before.HasPolicy -or (Test-RTPDisabled -PolicyOnly)
+        foreach ($name in @("WinDefend", "WdNisSvc", "Sense", "SecurityHealthService", "wscsvc", "WdNisDrv", "WdBoot", "WdFilter")) {
+            if ((Get-ServiceStartMode -Name $name) -eq "Disabled") { $legacy = $true }
+        }
+        if ($legacy) {
+            if (-not (Backup-DefenderRegistry)) { throw "No se pudo respaldar el registro. Recuperacion cancelada." }
+            Restore-LegacyDefenderConfiguration
+            [void]$log.Add("Bloqueos antiguos retirados selectivamente; politicas de actualizacion conservadas.")
+        }
+        foreach ($name in @("WinDefend", "WdNisSvc", "SecurityHealthService", "wscsvc")) {
+            $svc = Get-Service -Name $name -ErrorAction SilentlyContinue
+            if ($null -ne $svc -and $svc.Status -ne 'Running') {
+                try { Start-Service -Name $name -ErrorAction Stop }
+                catch { [void]$log.Add("[!] No se pudo iniciar ${name}: $($_.Exception.Message)") }
+            }
+        }
+        if ($legacy) {
+            foreach ($name in @("DisableBehaviorMonitoring", "DisableIOAVProtection", "DisableScriptScanning",
+                "DisableBlockAtFirstSeen", "DisableArchiveScanning", "DisableEmailScanning",
+                "DisableIntrusionPreventionSystem", "DisableRemovableDriveScanning", "DisableScanningNetworkFiles",
+                "DisableCatchupQuickScan", "DisableCatchupFullScan", "DisableRestorePoint")) {
+                if (-not (Set-MpPrefValue -Nombre $name -Valor $false)) { [void]$log.Add("[!] No se pudo restaurar $name") }
+            }
+        }
+        if (-not (Set-MpPrefValue -Nombre DisableRealtimeMonitoring -Valor $false)) {
+            [void]$log.Add("[!] Windows rechazo activar tiempo real.")
+        }
         Wait-WithDoEvents -Milliseconds 2000
-        $null = & sc.exe start WinDefend 2>&1
-        Start-Service -Name WinDefend -ErrorAction SilentlyContinue
-        Wait-WithDoEvents -Milliseconds 5000
-    } catch { }
-
-    [void]$log.Add("[6/11] Reintentando servicios fallidos...")
-    foreach ($s in $serviciosOrden) {
-        if ($s.N -eq "WinDefend") { continue }
-        $svc = Get-Service -Name $s.N -ErrorAction SilentlyContinue
-        if ($null -ne $svc -and $svc.Status -ne 'Running') {
-            try {
-                $null = & sc.exe start $s.N 2>&1
-                Start-Service -Name $s.N -ErrorAction SilentlyContinue
-                Wait-WithDoEvents -Milliseconds 2000
-            } catch { }
+        $after = Get-QuickStatus
+        if ($after.Estado -eq "ACTIVO") { [void]$log.Add("[OK] Proteccion en tiempo real confirmada.") }
+        else { [void]$log.Add("[!] Activacion NO confirmada. Revisa Seguridad de Windows; puede requerir reiniciar tras los bloqueos antiguos.") }
+        $st = Get-MpComputerStatus -ErrorAction Stop
+        if (-not (Test-DefenderSignaturesHealthy -Status $st)) {
+            [void]$log.Add("[!] Firmas ausentes (0.0.0.0) o no disponibles. Usa Reparar Firmas para descargarlas sin borrar las existentes.")
         }
+    } catch {
+        [void]$log.Add("[!] Activacion incompleta: $($_.Exception.Message)")
     }
-
-    [void]$log.Add("[7/11] Activando protecciones (Set-MpPreference, splatting)...")
-    if (Get-Command Set-MpPreference -ErrorAction SilentlyContinue) {
-        $prefsOn = @("DisableRealtimeMonitoring","DisableBehaviorMonitoring","DisableIOAVProtection",
-                     "DisableScriptScanning","DisableBlockAtFirstSeen","DisableArchiveScanning",
-                     "DisableEmailScanning","DisableIntrusionPreventionSystem",
-                     "DisableRemovableDriveScanning","DisableScanningNetworkFiles",
-                     "DisableCatchupQuickScan","DisableCatchupFullScan","DisableRestorePoint")
-        $rtpActivo = $false; $pi = 0
-        while (-not $rtpActivo -and $pi -lt 5) {
-            $pi++
-            $okPrefs = 0
-            foreach ($p in $prefsOn) { if (Set-MpPrefValue -Nombre $p -Valor $false) { $okPrefs++ } }
-            [void]$log.Add("       Intento ${pi}: $okPrefs de $($prefsOn.Count) preferencias forzadas a ON")
-            try {
-                Set-MpPreference -MAPSReporting Advanced -ErrorAction SilentlyContinue
-                Set-MpPreference -CloudBlockLevel High -ErrorAction SilentlyContinue
-                Set-MpPreference -CloudExtendedTimeout 50 -ErrorAction SilentlyContinue
-                Set-MpPreference -SubmitSamplesConsent 1 -ErrorAction SilentlyContinue
-                Set-MpPreference -PUAProtection Enabled -ErrorAction SilentlyContinue
-                Set-MpPreference -EnableNetworkProtection Enabled -ErrorAction SilentlyContinue
-            } catch { }
-            Wait-WithDoEvents -Milliseconds 3000
-            try {
-                $stCheck = Get-MpComputerStatus -ErrorAction Stop
-                $rtpActivo = [bool]$stCheck.RealTimeProtectionEnabled
-            } catch { }
-            if (-not $rtpActivo) { Wait-WithDoEvents -Milliseconds 2000 }
-        }
-        if ($rtpActivo) {
-            [void]$log.Add("       Protecciones ACTIVADAS (tiempo real confirmado).")
-        } else {
-            [void]$log.Add("       [!] Tiempo real aun no confirmado tras $pi intentos.")
-        }
-    }
-
-    [void]$log.Add("[8/11] Tamper Protection...")
-    try {
-        $tpPath = "HKLM:\SOFTWARE\Microsoft\Windows Defender\Features"
-        if (-not (Test-Path $tpPath)) { New-Item -Path $tpPath -Force | Out-Null }
-        Set-ItemProperty -Path $tpPath -Name "TamperProtection" -Value 5 -Type DWord -Force -ErrorAction SilentlyContinue
-        Stop-Service -Name WinDefend -Force -ErrorAction SilentlyContinue
-        Wait-WithDoEvents -Milliseconds 800
-        Start-Service -Name WinDefend -ErrorAction SilentlyContinue
-        Wait-WithDoEvents -Milliseconds 3000
-        $verify = $false
-        try { $verify = (Get-MpComputerStatus -ErrorAction Stop).IsTamperProtected } catch { }
-        if ($verify) { [void]$log.Add("       Tamper: ACTIVADO") } else { [void]$log.Add("       Tamper: RECHAZADO (activala en Seguridad de Windows)") }
-    } catch { }
-
-    [void]$log.Add("[9/11] Lanzando icono + gpupdate...")
-    try {
-        $systray = "$env:windir\System32\SecurityHealthSystray.exe"
-        if (Test-Path $systray) { Start-Process -FilePath $systray -ErrorAction SilentlyContinue }
-    } catch { }
-    try { $null = & gpupdate.exe /force 2>&1 } catch { }
-    Wait-WithDoEvents -Milliseconds 2000
-
-    [void]$log.Add("[10/11] Verificacion final...")
-    Wait-WithDoEvents -Milliseconds 2000
-
-    $allRunning = $true
-    foreach ($s in $svcConfig) {
-        if (-not $s.Run) { continue }
-        $svc = Get-Service -Name $s.N -ErrorAction SilentlyContinue
-        $st = if ($null -ne $svc) { $svc.Status } else { "NO EXISTE" }
-        $ok = ($st -eq 'Running')
-        if (-not $ok) { $allRunning = $false }
-        $marca = if ($ok) { "[OK]" } else { "[!]" }
-        [void]$log.Add("       $marca $($s.N): $st")
-    }
-
-    $procFin = Get-Process -Name MsMpEng -ErrorAction SilentlyContinue
-    $procOk = ($null -ne $procFin)
-    $rtpOk = $false; $antivirusOk = $false
-    try {
-        $stFin = Get-MpComputerStatus -ErrorAction Stop
-        $rtpOk = $stFin.RealTimeProtectionEnabled
-        $antivirusOk = $stFin.AntivirusEnabled
-    } catch { }
-    $startOk = $true
-    foreach ($s in @("WinDefend","WdNisSvc","Sense")) {
-        if ((Get-ServiceStartMode -Name $s) -eq "Disabled") { $startOk = $false }
-    }
-
-    [void]$log.Add("")
-    [void]$log.Add("=== RESULTADO ===")
-    if ($allRunning) { [void]$log.Add("  Servicios:   TODOS") } else { [void]$log.Add("  Servicios:   ALGUNOS FALLARON") }
-    if ($procOk) { [void]$log.Add("  MsMpEng:     CORRIENDO") } else { [void]$log.Add("  MsMpEng:     DETENIDO") }
-    if ($rtpOk) { [void]$log.Add("  Tiempo real: ACTIVADO") } else { [void]$log.Add("  Tiempo real: DESACTIVADO") }
-    if ($antivirusOk) { [void]$log.Add("  Antivirus:   ACTIVADO") } else { [void]$log.Add("  Antivirus:   DESACTIVADO") }
-    if ($startOk) { [void]$log.Add("  Servicios:   inicio automatico restaurado") } else { [void]$log.Add("  Servicios:   inicio aun deshabilitado") }
-
-    [void]$log.Add("")
-    if ($allRunning -and $procOk -and $rtpOk -and $antivirusOk -and $startOk) {
-        [void]$log.Add("[OK] ACTIVACION TOTAL COMPLETADA. Defender esta 100% activado.")
-    } elseif ($procOk -and $rtpOk) {
-        [void]$log.Add("[OK] Activacion funcional. Reinicia para completar.")
-    } else {
-        [void]$log.Add("[!] Activacion parcial.")
-    }
-
-    $sw.Stop()
-    [void]$log.Add("")
-    [void]$log.Add("[OK] Tiempo: {0:N2}s" -f $sw.Elapsed.TotalSeconds)
-    Send-AllNotifications -Mensaje "Defender activado. Estado: $((Get-QuickStatus).Estado)" -Severidad "info" -Data @{ estado=(Get-QuickStatus).Estado }
-    if ($script:CfgCloudBackup) { Backup-ToCloud }
+    Write-AppLog ($log -join "`r`n") "INFO"
     return ($log -join "`r`n")
 }
 
@@ -3322,7 +2983,7 @@ function Show-DiagnosticsDialog {
     })
     $btnRep.Add_Click({
         $log = Repair-DefenderSignatures
-        Show-ResultDialog -Titulo "Reparacion de Firmas" -Mensaje $log -Tipo "Success"
+        Show-ResultDialog -Titulo "Reparacion de Firmas" -Mensaje $log -Tipo $(if ($log -match "\[OK\]") { "Success" } else { "Warning" })
         & $cargarDiag
     })
     $btnEvents.Add_Click({ Show-EventLogDialog })
@@ -3554,12 +3215,12 @@ function Show-DeepRepairDialog {
     $dlg.Controls.Add($console)
     $script:RepairConsole = $console
 
-    $btnReg  = New-NeonButton "1. Borrar Politicas"    $script:Colors.AccentRed    $script:Colors.AccentRedH    15  580 165 34
+    $btnReg  = New-NeonButton "1. Recuperar Defender"    $script:Colors.AccentRed    $script:Colors.AccentRedH    15  580 165 34
     $btnSvc  = New-NeonButton "2. Servicios"           $script:Colors.AccentAmber  $script:Colors.AccentAmberH  190 580 175 34
     $btnGpu  = New-NeonButton "3. gpupdate"            $script:Colors.AccentPurple $script:Colors.AccentPurpH   375 580 130 34
     $btnSFC  = New-NeonButton "4. sfc /scannow"        $script:Colors.AccentBlue   $script:Colors.AccentBlueH   515 580 140 34
     $btnDISM = New-NeonButton "5. DISM Restore"        $script:Colors.AccentCyan   $script:Colors.AccentCyanH   665 580 140 34
-    $btnKill = New-NeonButton "Matar MsMpEng"          $script:Colors.AccentRed    $script:Colors.AccentRedH    815 580 130 34
+    $btnKill = New-NeonButton "Seguridad Windows"          $script:Colors.AccentRed    $script:Colors.AccentRedH    815 580 130 34
     $btnFirmas = New-NeonButton "REPARAR FIRMAS"       $script:Colors.AccentGreen  $script:Colors.AccentGreenH  15  625 230 40
     $btnTodo   = New-NeonButton "REPARAR TODO"         $script:Colors.AccentGreen  $script:Colors.AccentGreenH  255 625 230 40
     $btnADInv  = New-NeonButton "AD Inventory"         $script:Colors.AccentBlue   $script:Colors.AccentBlueH   495 625 160 40
@@ -3569,9 +3230,8 @@ function Show-DeepRepairDialog {
     foreach ($b in @($btnReg,$btnSvc,$btnGpu,$btnSFC,$btnDISM,$btnKill,$btnFirmas,$btnTodo,$btnADInv,$btnCert,$btnCerr)) { $dlg.Controls.Add($b) }
 
     $btnReg.Add_Click({
-        Invoke-ConsoleCmd "reg delete `"HKLM\SOFTWARE\Policies\Microsoft\Windows Defender`" /f"
-        Invoke-ConsoleCmd "reg delete `"HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies`" /f"
-        Invoke-ConsoleCmd "reg delete `"HKCU\Software\Microsoft\Windows\CurrentVersion\Policies`" /f"
+        $repLog = Enable-Defender
+        $script:RepairConsole.AppendText("$repLog`r`n")
     })
     $btnSvc.Add_Click({
         foreach ($s in @("WinDefend","WdNisSvc","Sense","SecurityHealthService","wscsvc")) {
@@ -3582,34 +3242,26 @@ function Show-DeepRepairDialog {
     $btnGpu.Add_Click({ Invoke-ConsoleCmd "gpupdate /force" })
     $btnSFC.Add_Click({ Invoke-ConsoleCmd "sfc /scannow" })
     $btnDISM.Add_Click({ Invoke-ConsoleCmd "DISM /Online /Cleanup-Image /RestoreHealth" })
-    $btnKill.Add_Click({
-        Invoke-ConsoleCmd "taskkill /F /IM MsMpEng.exe"
-        Invoke-ConsoleCmd "taskkill /F /IM NisSrv.exe"
-    })
+    $btnKill.Add_Click({ Start-Process "windowsdefender://threatsettings" })
     $btnFirmas.Add_Click({
         $c = $script:RepairConsole
         $repLog = Repair-DefenderSignatures
         foreach ($linea in ($repLog -split "`r?`n")) { $c.AppendText("$linea`r`n") }
-        Add-HistoryDB -Accion "Reparar Firmas" -Resultado "OK" -Segundos 0
+        Add-HistoryDB -Accion "Reparar Firmas" -Resultado $(if ($repLog -match "\[OK\]") { "OK" } else { "ERROR" }) -Segundos 0 -Detalle $repLog
     })
     $btnTodo.Add_Click({
         $c = $script:RepairConsole
         $c.AppendText("==============================================`r`n")
         $c.AppendText("      REPARACION AUTOMATICA COMPLETA v8.2`r`n")
         $c.AppendText("==============================================`r`n")
-        Invoke-ConsoleCmd "reg delete `"HKLM\SOFTWARE\Policies\Microsoft\Windows Defender`" /f"
-        Invoke-ConsoleCmd "gpupdate /force"
-        foreach ($s in @("WinDefend","WdNisSvc","Sense","SecurityHealthService","wscsvc")) {
-            Invoke-ConsoleCmd "sc config $s start= auto"
-            Invoke-ConsoleCmd "sc start $s"
-        }
-        try { Set-MpPreference -DisableRealtimeMonitoring $false -ErrorAction SilentlyContinue } catch { }
+        $enableLog = Enable-Defender
+        $c.AppendText("$enableLog`r`n")
         $repLog = Repair-DefenderSignatures
         foreach ($linea in ($repLog -split "`r?`n")) { $c.AppendText("$linea`r`n") }
         Invoke-ConsoleCmd "sfc /scannow"
         Invoke-ConsoleCmd "DISM /Online /Cleanup-Image /RestoreHealth"
-        $c.AppendText("`r`n[OK] REINICIA EL EQUIPO.`r`n")
-        Add-HistoryDB -Accion "Reparacion Completa" -Resultado "OK" -Segundos 0
+        $c.AppendText("`r`nRevisa los resultados. Puede ser necesario reiniciar el equipo.`r`n")
+        Add-HistoryDB -Accion "Reparacion Completa" -Resultado (Get-QuickStatus).Estado -Segundos 0 -Detalle "$enableLog`r`n$repLog"
     })
     $btnADInv.Add_Click({ Show-ADDialog })
     $btnCert.Add_Click({ Show-CertificateGuide })
@@ -4113,12 +3765,12 @@ DEFENDER CONTROL v8.2 ULTIMATE
 
 NOVEDADES v8.2
 --------------
- 1. UN SOLO CLIC: activar/desactivar completo, sin confirmaciones
- 2. Desactivacion TOTAL (fix de Set-MpPreference: 15+ protecciones)
- 3. Activacion TOTAL con verificacion de tiempo real
- 4. Tamper Protection guiada (ya no bloquea la operacion)
- 5. Estado real DESACTIVADO + aviso de reinicio pendiente
- 6. Politicas completas: ExploitGuard, PUA, SmartScreen, RTP
+ 1. ACTIVAR y DESACTIVAR adyacentes, segun estado y operacion en curso
+ 2. Desactivar pausa tiempo real sin cerrar el motor ni el actualizador
+ 3. Activar verifica tiempo real sin reiniciar servicios que ya funcionan
+ 4. Windows puede bloquear cambios: se informa sin forzar el sistema
+ 5. Estado confirmado por Windows; errores como PARCIAL
+ 6. Reparar Firmas descarga sin borrar definiciones ni politicas de fuentes
  7. CLI: -action toggle
 
 Hereda de la v8.1: SQLite cifrado, MSI WiX, FCM v1, Fleet Console,
@@ -4268,7 +3920,8 @@ $script:PanelLblDet2       = $null
 $script:PanelLblDet3       = $null
 $script:PanelLblReloj      = $null
 $script:PanelLblTimer      = $null
-$script:PanelBtnToggle      = $null
+$script:PanelBtnDisable     = $null
+$script:PanelBtnActivate    = $null
 $script:PanelTimer         = $null
 $script:PanelStatusLabel   = $null
 $script:PanelAllButtons    = @()
@@ -4295,21 +3948,27 @@ function Set-PanelBusy {
             }
         }
     }
+    if (-not $Busy) { Update-PanelStatusUI }
     try { [System.Windows.Forms.Application]::DoEvents() } catch { }
 }
 
-function Set-ToggleButtonLook {
-    # v8.2: el boton unico adapta texto y color a la accion que disparara.
-    param([string]$Modo)
-    $b = $script:PanelBtnToggle
-    if ($null -eq $b) { return }
-    $txt = T "ToggleDisable"; $n = $script:Colors.AccentRed; $h = $script:Colors.AccentRedH
-    if ($Modo -eq "Enable") { $txt = T "ToggleEnable"; $n = $script:Colors.AccentGreen; $h = $script:Colors.AccentGreenH }
-    elseif ($Modo -eq "FinishOff") { $txt = T "ToggleFinishOff"; $n = $script:Colors.AccentAmber; $h = $script:Colors.AccentAmberH }
-    elseif ($Modo -eq "FinishOn") { $txt = T "ToggleFinishOn"; $n = $script:Colors.AccentAmber; $h = $script:Colors.AccentAmberH }
-    $b.Text = $txt
-    $b.Tag = @{ Normal = $n; Hover = $h }
-    try { Set-NeonButtonState -Boton $b -Habilitado (-not $script:IsBusy) } catch { }
+function Get-ProtectionActionAvailability {
+    param([string]$Estado, [bool]$Busy)
+    return [PSCustomObject]@{
+        Activate = (-not $Busy) -and ($Estado -ne "ACTIVO")
+        Deactivate = (-not $Busy) -and ($Estado -eq "ACTIVO")
+    }
+}
+
+function Update-ProtectionButtons {
+    param($Estado)
+    $available = Get-ProtectionActionAvailability -Estado $Estado.Estado -Busy $script:IsBusy
+    if ($null -ne $script:PanelBtnActivate) {
+        Set-NeonButtonState -Boton $script:PanelBtnActivate -Habilitado $available.Activate
+    }
+    if ($null -ne $script:PanelBtnDisable) {
+        Set-NeonButtonState -Boton $script:PanelBtnDisable -Habilitado $available.Deactivate
+    }
 }
 
 function Update-PanelStatusUI {
@@ -4324,18 +3983,16 @@ function Update-PanelStatusUI {
         $script:PanelLblValor.ForeColor = $script:Colors.Ok
         $script:PanelLblDet1.Text = "El antivirus esta protegiendo este equipo."
         $script:PanelLblDet2.Text = $diag
-        Set-ToggleButtonLook -Modo "Disable"
+
         if ($null -ne $script:PanelStatusLabel) { $script:PanelStatusLabel.Text = "ACTIVADO"; $script:PanelStatusLabel.ForeColor = $script:Colors.Ok }
     } elseif ($s.Estado -eq "PARCIAL") {
         $script:PanelHeader.BackColor = $script:Colors.HeaderPart
         $script:PanelLblValor.Text = "PROTECCION PARCIAL"
         $script:PanelLblValor.ForeColor = $script:Colors.Warn
         if ($s.HasPolicy -or $s.ServicesDisabled) {
-            $script:PanelLblDet1.Text = "Usa ACTIVAR para restaurar o UN CLIC para seguir desactivando."
-            Set-ToggleButtonLook -Modo "FinishOff"
+            $script:PanelLblDet1.Text = "Usa ACTIVAR para recuperar la proteccion."
         } else {
-            $script:PanelLblDet1.Text = "Usa ACTIVAR para restaurar o UN CLIC para terminar de activar."
-            Set-ToggleButtonLook -Modo "FinishOn"
+            $script:PanelLblDet1.Text = "Estado no confirmado. Usa ACTIVAR o consulta Diagnostico."
         }
         $script:PanelLblDet2.Text = $diag
         if ($null -ne $script:PanelStatusLabel) { $script:PanelStatusLabel.Text = "PARCIAL"; $script:PanelStatusLabel.ForeColor = $script:Colors.Warn }
@@ -4344,15 +4001,16 @@ function Update-PanelStatusUI {
         $script:PanelLblValor.Text = "DESACTIVADO"
         $script:PanelLblValor.ForeColor = $script:Colors.Bad
         if ($s.PendingReboot) {
-            $script:PanelLblDet1.Text = "Desactivado al 100%. Reinicia el equipo para hacerlo efectivo."
+            $script:PanelLblDet1.Text = "Cambios antiguos pendientes; revisa Diagnostico."
         } else {
-            $script:PanelLblDet1.Text = "El antivirus esta inactivo."
+            $script:PanelLblDet1.Text = "Tiempo real pausado; motor y actualizaciones disponibles."
         }
         $script:PanelLblDet2.Text = $diag
-        Set-ToggleButtonLook -Modo "Enable"
+
         if ($null -ne $script:PanelStatusLabel) { $script:PanelStatusLabel.Text = "DESACTIVADO"; $script:PanelStatusLabel.ForeColor = $script:Colors.Bad }
     }
 
+    Update-ProtectionButtons -Estado $s
     if ($script:LastActionTime -gt 0) {
         $script:PanelLblDet3.Text = "Ultima: $($script:LastActionName) en {0:N2}s" -f $script:LastActionTime
     } else {
@@ -4426,20 +4084,12 @@ function Show-DefenderPanel {
     $miAct = New-Object System.Windows.Forms.ToolStripMenuItem; $miAct.Text = "Activar"
     $miAct.Add_Click({ Invoke-EnableProtection -Accion "Activar" })
     $miDes = New-Object System.Windows.Forms.ToolStripMenuItem; $miDes.Text = "Desactivar"
-    $miDes.Add_Click({
-        if (-not (Test-Admin)) { return }
-        try {
-            $script:IsBusy = $true; Set-PanelBusy $true
-            Start-ActionTimer; $script:LastActionName = "Desactivar"
-            [System.Windows.Forms.Application]::DoEvents()
-            $null = Disable-Defender
-            $elapsed = Get-ActionElapsedSeconds
-            $script:LastActionTime = $elapsed; Stop-ActionTimer | Out-Null
-            $script:IsBusy = $false; Set-PanelBusy $false
-            Update-PanelStatusUI
-            $s = Get-QuickStatus
-            Add-HistoryDB -Accion "Desactivar" -Resultado $s.Estado -Segundos $elapsed
-        } finally { $script:IsBusy = $false; Stop-ActionTimer | Out-Null; Set-PanelBusy $false }
+    $miDes.Add_Click({ Invoke-ToggleProtection -Accion "Desactivar" })
+    $mAcciones.Add_DropDownOpening({
+        $available = Get-ProtectionActionAvailability -Estado (Get-QuickStatus).Estado -Busy $script:IsBusy
+        $this.DropDownItems[0].Enabled = -not $script:IsBusy
+        $this.DropDownItems[2].Enabled = $available.Activate
+        $this.DropDownItems[3].Enabled = $available.Deactivate
     })
     $miEmerg = New-Object System.Windows.Forms.ToolStripMenuItem; $miEmerg.Text = "EMERGENCIA"
     $miEmerg.Add_Click({ Invoke-EmergencyActivation })
@@ -4573,15 +4223,15 @@ function Show-DefenderPanel {
     $card.Controls.Add($lblDet3)
 
     $btnDiagnostico = New-NeonButton (T "Diagnostico")  $script:Colors.AccentPurple $script:Colors.AccentPurpH  15  245 470 32
-    $btnToggle      = New-NeonButton (T "ToggleDisable") $script:Colors.AccentRed    $script:Colors.AccentRedH   15  282 470 42
-    $btnActivate    = New-NeonButton (T "Activar")       $script:Colors.AccentGreen  $script:Colors.AccentGreenH 15  327 470 36
-    $btnReparar     = New-NeonButton (T "Reparar")      $script:Colors.AccentAmber  $script:Colors.AccentAmberH 15  368 470 36
-    $btnEmerg       = New-NeonButton (T "Emergencia")   $script:Colors.AccentRed    $script:Colors.AccentRedH   15  409 230 32
-    $btnEventos     = New-NeonButton "Event Log"        $script:Colors.AccentPurple $script:Colors.AccentPurpH  255 409 230 32
-    $btnHistorial   = New-NeonButton (T "Historial")    $script:Colors.AccentBlue   $script:Colors.AccentBlueH  15  448 110 32
-    $btnConfig      = New-NeonButton (T "Config")       $script:Colors.AccentBlue   $script:Colors.AccentBlueH  135 448 110 32
-    $btnAyuda       = New-NeonButton (T "Ayuda")        $script:Colors.AccentBlue   $script:Colors.AccentBlueH  255 448 110 32
-    $btnSalir       = New-NeonButton (T "Salir")        $script:Colors.AccentRed    $script:Colors.AccentRedH   375 448 110 32
+    $btnActivate    = New-NeonButton (T "Activar")       $script:Colors.AccentGreen  $script:Colors.AccentGreenH 15  285 230 32
+    $btnToggle      = New-NeonButton (T "Desactivar")    $script:Colors.AccentRed    $script:Colors.AccentRedH   255 285 230 32
+    $btnReparar     = New-NeonButton (T "Reparar")      $script:Colors.AccentAmber  $script:Colors.AccentAmberH 15  325 470 36
+    $btnEmerg       = New-NeonButton (T "Emergencia")   $script:Colors.AccentRed    $script:Colors.AccentRedH   15  370 230 32
+    $btnEventos     = New-NeonButton "Event Log"        $script:Colors.AccentPurple $script:Colors.AccentPurpH  255 370 230 32
+    $btnHistorial   = New-NeonButton (T "Historial")    $script:Colors.AccentBlue   $script:Colors.AccentBlueH  15  410 110 32
+    $btnConfig      = New-NeonButton (T "Config")       $script:Colors.AccentBlue   $script:Colors.AccentBlueH  135 410 110 32
+    $btnAyuda       = New-NeonButton (T "Ayuda")        $script:Colors.AccentBlue   $script:Colors.AccentBlueH  255 410 110 32
+    $btnSalir       = New-NeonButton (T "Salir")        $script:Colors.AccentRed    $script:Colors.AccentRedH   375 410 110 32
 
     $script:PanelAllButtons = @($btnDiagnostico,$btnToggle,$btnActivate,$btnReparar,$btnEmerg,$btnEventos,$btnHistorial,$btnConfig,$btnAyuda,$btnSalir)
     foreach ($b in $script:PanelAllButtons) { $form.Controls.Add($b) }
@@ -4616,7 +4266,8 @@ function Show-DefenderPanel {
     $script:PanelLblDet3 = $lblDet3
     $script:PanelLblReloj = $lblReloj
     $script:PanelLblTimer = $lblTimer
-    $script:PanelBtnToggle = $btnToggle
+    $script:PanelBtnDisable = $btnToggle
+    $script:PanelBtnActivate = $btnActivate
 
     $form.Add_KeyDown({
         param($sender, $e)
@@ -4637,7 +4288,7 @@ function Show-DefenderPanel {
     $btnEmerg.Add_Click({ Invoke-EmergencyActivation })
     $btnActivate.Add_Click({ Invoke-EnableProtection -Accion "Activar" })
 
-    $btnToggle.Add_Click({ Invoke-ToggleProtection })
+    $btnToggle.Add_Click({ Invoke-ToggleProtection -Accion "Desactivar" })
 
     $btnSalir.Add_Click({
         if ($null -ne $script:PanelTimer) { try { $script:PanelTimer.Stop(); $script:PanelTimer.Dispose() } catch { }; $script:PanelTimer = $null }
@@ -4713,11 +4364,18 @@ function Initialize-RESTApi {
         function Get-StatusJson {
             $svc = Get-Service -Name WinDefend -ErrorAction SilentlyContinue
             $proc = Get-Process -Name MsMpEng -ErrorAction SilentlyContinue
-            $rtp = "DESCONOCIDO"
-            try { $rtp = if((Get-MpComputerStatus).RealTimeProtectionEnabled){"ACTIVADO"}else{"DESACTIVADO"} } catch { }
-            $estado = if ($svc -and $svc.Status -eq "Running" -and $null -ne $proc -and $rtp -eq "ACTIVADO") {"ACTIVO"}
-                      elseif ($null -eq $proc) {"DESACTIVADO"}
-                      else {"PARCIAL"}
+            $rtp = "DESCONOCIDO"; $known = $false; $av = $false
+            try {
+                $st = Get-MpComputerStatus -ErrorAction Stop
+                if ($null -ne $st -and $null -ne $st.RealTimeProtectionEnabled -and $null -ne $st.AntivirusEnabled) {
+                    $known = $true; $av = [bool]$st.AntivirusEnabled
+                    $rtp = if ($st.RealTimeProtectionEnabled) { "ACTIVADO" } else { "DESACTIVADO" }
+                }
+            } catch { }
+            $ready = $known -and $av -and $svc -and $svc.Status -eq "Running" -and $null -ne $proc
+            $estado = if ($ready -and $rtp -eq "ACTIVADO") { "ACTIVO" }
+                      elseif ($ready -and $rtp -eq "DESACTIVADO") { "DESACTIVADO" }
+                      else { "PARCIAL" }
             return @{
                 estado = $estado
                 servicio = if ($svc) { $svc.Status.ToString() } else { "Unknown" }
@@ -5040,7 +4698,7 @@ $miToggle = Add-MenuItem "UN CLIC: Activar/Desactivar" { Invoke-ToggleProtection
 [void]$menu.Items.Add((Add-MenuItem "Event Log" { Show-EventLogDialog }))
 [void]$menu.Items.Add((Add-MenuItem "Reparar Firmas" {
     $log = Repair-DefenderSignatures
-    Show-ResultDialog -Titulo "Reparacion de Firmas" -Mensaje $log -Tipo "Success"
+    Show-ResultDialog -Titulo "Reparacion de Firmas" -Mensaje $log -Tipo $(if ($log -match "\[OK\]") { "Success" } else { "Warning" })
 }))
 [void]$menu.Items.Add((Add-MenuItem "Reparacion Profunda" { Show-DeepRepairDialog }))
 [void]$menu.Items.Add((Add-MenuItem "Fleet Console" {
@@ -5059,11 +4717,7 @@ $miAct = Add-MenuItem "Activar Defender" {
     Invoke-EnableProtection -Accion "Activar (menu)"
 }
 $miDes = Add-MenuItem "Desactivar Defender" {
-    if (-not (Test-Admin)) { return }
-    $null = Disable-Defender
-    $s = Get-QuickStatus
-    Add-HistoryDB -Accion "Desactivar (menu)" -Resultado $s.Estado -Segundos 0
-    Update-TrayIcon -Estado $s.Estado
+    Invoke-ToggleProtection -Accion "Desactivar"
 }
 [void]$menu.Items.Add($miAct)
 [void]$menu.Items.Add($miDes)
@@ -5085,16 +4739,19 @@ $miDes = Add-MenuItem "Desactivar Defender" {
 $menu.Add_Opening({
     $s = Get-QuickStatus
     if ($s.Estado -eq "ACTIVO") {
-        $miToggle.Text = "UN CLIC: Desactivar COMPLETO"
+        $miToggle.Text = "UN CLIC: Pausar tiempo real"
         $miAct.Enabled = $false; $miDes.Enabled = $true
     } elseif ($s.Estado -eq "DESACTIVADO") {
-        $miToggle.Text = "UN CLIC: Activar COMPLETO"
+        $miToggle.Text = "UN CLIC: Activar tiempo real"
         $miAct.Enabled = $true; $miDes.Enabled = $false
     } else {
         if ((Get-ToggleAction -Estado $s) -eq "Desactivar") { $miToggle.Text = "UN CLIC: Terminar de DESACTIVAR" }
         else { $miToggle.Text = "UN CLIC: Terminar de ACTIVAR" }
-        $miAct.Enabled = $true; $miDes.Enabled = $true
+        $miAct.Enabled = $true; $miDes.Enabled = $false
     }
+    $available = Get-ProtectionActionAvailability -Estado $s.Estado -Busy $script:IsBusy
+    $miAct.Enabled = $available.Activate; $miDes.Enabled = $available.Deactivate
+    $miToggle.Enabled = -not $script:IsBusy
 })
 
 $script:notifyIcon.ContextMenuStrip = $menu
