@@ -9,6 +9,40 @@ Historial de DefenderTray reconstruido **a partir de lo que declaran los propios
 >
 > El formato sigue [Keep a Changelog](https://keepachangelog.com/es/1.1.0/) (`Añadido`, `Cambiado`, `Corregido`, `Obsoleto`) y la numeración del proyecto es *ad-hoc*: la rama 4.x usó sufijos `+`, `Pro`, `_Final` en lugar de números.
 
+## [8.4.0 ULTIMATE] — 2026-10-18
+
+### Mejoras v8.4.0
+- **Atajos de teclado Alt+letra** en botones principales (`&` mnemonic); `Esc` y `Enter` (AcceptButton/CancelButton) en todos los diálogos.
+- Nuevo botón **Backup Firmas** en Diagnóstico: copia sin contacto la carpeta activa de definiciones (`.vdm`, `mpcmdrun.exe` y DLLs necesarias) a una carpeta externa para recuperación offline.
+- Sección **«Firmas digitales (motor/drivers)»** en Diagnóstico: valida el `AuthenticodeSignature` de `MsMpEng.exe`, `MpCmdRun.exe`, `MpClient.dll`, `WdBoot.sys`, `WdFilter.sys`, `WdNisDrv.sys` (verde/rojo/amarillo).
+- Sección **«Firmas (definiciones)»** en Diagnóstico: muestra carpeta activa y recuento de `.vdm`.
+- **Modo de toggle** configurable en Ajustes:
+  - `Full` (RTP + Nube + Muestras) — recomendado
+  - `Solo RTP` (compatibilidad con el comportamiento v8.2)
+- Opción **Alertar si el toggle queda PARCIAL** (activada por defecto). Toast `Warning` diferenciado cuando sólo parte de la protección cambió; la guía de Tamper Protection sólo se abre si esta opción está activada.
+- Log detallado por cada preferencia rechazada (nombre + valor) para diagnosticar políticas de empresa/Tamper Protection.
+- Panel de botones de Diagnóstico redistribuido en dos filas para no saturar.
+
+### Corregido
+- **Botón Cerrar de Event Log:** el diálogo usaba `.Click += { $dlg.Close() }` con captura tardía de `$dlg` y la ListView anclada a `Top,Left,Right,Bottom` con coordenadas absolutas tapaba el botón. Se rehízo con panel de botones `Dock=Bottom`, `CancelButton` del formulario enlazado al Cerrar, handler creado con `.GetNewClosure()` y soporte de tecla **Esc** en todos los diálogos.
+- Todos los botones Cerrar del resto de diálogos (Resultado, Historial, Reparación Profunda, Programador, Configuración, Ayuda, Estadísticas, Diagnóstico, Kiosco) usan ahora `Add_Click` con clausura correcta y responden a Esc a través del helper `Enable-DialogEscClose`.
+- Repositorio por defecto corregido de `usuario/DefenderTray` (placeholder) a `yhquintero/DefenderTray`. Al iniciar se migra automáticamente una configuración antigua para que *Buscar Actualización* funcione.
+
+### Añadido
+- **Desactivación COMPLETA no destructiva:** `Disable-Defender` apaga además de tiempo real:
+  - Protección basada en la nube (`DisableBlockAtFirstSeen=$true`, `CloudProtectionLevel="0"`, `MAPSReporting=0`)
+  - Envío automático de muestras (`SubmitSamplesConsent=0`, política SpyNet `SubmitSamplesConsent=2`)
+- **Activación COMPLETA:** `Enable-Defender` reactiva BAFS, CloudProtectionLevel=Alta, MAPS=Advanced, SubmitSamplesConsent=Envío automático seguro, y limpia los valores de política que pudo dejar la desactivación.
+- `Confirm-CloudDisabled` / `Confirm-CloudEnabled` verifican el estado real de nube y muestras tras cada toggle.
+- Sección **“Nube y muestras”** en el Diagnóstico (BAFS, CloudProtectionLevel, SubmitSamplesConsent, MAPSReporting), en color verde/rojo/neutro según su estado.
+- Helper `Set-DefenderPreferencesBulk` que aplica cada preferencia individualmente con `Set-MpPrefValue` para que un fallo no cancele el resto.
+- Helper `Enable-DialogEscClose` para estandarizar Esc/CancelButton en todos los diálogos.
+- Waits reducidos de 2 s a 800 ms / 500 ms para que el toggle sea más rápido sin perder fiabilidad.
+
+### Conservado / Seguridad
+- No se modifican servicios (`WinDefend`, `WdNisSvc`, `Sense`, `SecurityHealthService`, `wscsvc`), controladores (`WdBoot`, `WdFilter`, `WdNisDrv`), bases de firmas (`.vdm`), exclusiones, rutas WSUS ni políticas de Signature Updates.
+- Cada `Set-MpPreference` va por splatting con `ErrorAction=Stop`; los rechazos de Windows se reportan en el log y en el resultado, nunca se declara éxito por intención. Si Tamper Protection bloquea, se ofrece abrir `windowsdefender://threatsettings`.
+
 ## [Sin publicar] — conservación de firmas y botones (2026-10-18)
 
 ### Corregido
@@ -50,6 +84,24 @@ No cambia el comportamiento del script: es todo lo que hay a su alrededor.
 
 - **El `.wxs` ya compila sin errores ICE.** `ICE80` (`This 32BitComponent ... uses 64BitDirectory INSTALLFOLDER`): el paquete es x64 (`Platform="x64"`) y los componentes son de 64 bits (`Win64="yes"`), ademas de `-arch x64` al compilar. `ICE64` (`The directory ProgramMenuDir is in the user profile but is not listed in the RemoveFile table`): el componente del acceso directo pasa a vivir dentro de `ProgramMenuDir` con `RemoveFolder` sobre esa misma carpeta y su clave de registro pasa de `HKCU` a `HKLM`, con lo que el acceso directo es por maquina. Las plantillas embebidas en los tres scripts y la del repositorio quedan iguales.
 - `New-WixInstallerPackage` (el generador de MSI del panel) ya no exige que WiX este en el PATH: localiza `candle.exe`/`light.exe` en las instalaciones habituales de WiX v3 y anade la carpeta al PATH de la sesion antes de compilar.
+
+## [8.3.1 ULTIMATE]
+
+📄 [`versiones/8/DefenderTray_8.3_Pro.ps1`](versiones/8/DefenderTray_8.3_Pro.ps1) · 5 003 líneas · versión estable de mantenimiento
+
+### Añadido (sobre 8.2)
+- **Desactivar COMPLETO**: además de tiempo real apaga protección en la nube (BAFS, CloudProtectionLevel=0, MAPSReporting=0) y envío automático de muestras (`SubmitSamplesConsent=0`, política SpyNet=2).
+- **Activar COMPLETO**: reactivación de BAFS, CloudProtectionLevel=Alta, MAPS=Advanced, SubmitSamplesConsent=envío automático seguro, y limpieza de claves de política que pudo dejar la desactivación. Verificación real con `Get-MpComputerStatus` tras cada paso.
+- Sección **Nube y muestras** en Diagnóstico (verde/rojo/neutro).
+- Repositorio por defecto corregido a `yhquintero/DefenderTray` con migración automática de configuraciones antiguas.
+
+### Corregido
+- **Botón Cerrar del diálogo Event Log no respondía al clic**: la ListView cubría el botón (coordenadas absolutas vs Dock). Se rehízo con panel de botones `Dock=Bottom`, `CancelButton` asignado, handler creado con `.GetNewClosure()` para capturar `$dlg` correctamente y soporte de tecla **Esc** en todos los diálogos.
+- `Enable-DialogEscClose` helper para Esc/CancelButton.
+- Waits reducidos (2 s → 800/500 ms) para toggles más rápidos sin perder fiabilidad.
+- Helper `Set-DefenderPreferencesBulk` que aplica cada preferencia individualmente; un fallo no cancela el resto.
+
+> Esta versión es la **estable de mantenimiento** y no incluye los chips, la pausa automática, los atajos Alt+letra, DPI awareness, export/import de configuración ni el modo de toggle configurable. Esas novedades vienen en **v8.4.0**.
 
 ## [8.2 ULTIMATE] ⭐ actual
 
