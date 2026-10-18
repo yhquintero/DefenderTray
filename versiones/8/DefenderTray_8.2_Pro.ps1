@@ -2742,7 +2742,7 @@ function Enable-Defender {
             $pi++
             $okPrefs = 0
             foreach ($p in $prefsOn) { if (Set-MpPrefValue -Nombre $p -Valor $false) { $okPrefs++ } }
-            [void]$log.Add("       Intento $pi: $okPrefs de $($prefsOn.Count) preferencias forzadas a ON")
+            [void]$log.Add("       Intento ${pi}: $okPrefs de $($prefsOn.Count) preferencias forzadas a ON")
             try {
                 Set-MpPreference -MAPSReporting Advanced -ErrorAction SilentlyContinue
                 Set-MpPreference -CloudBlockLevel High -ErrorAction SilentlyContinue
