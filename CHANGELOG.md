@@ -21,6 +21,19 @@ No cambia el comportamiento del script: es todo lo que hay a su alrededor.
 - Plantillas de issue (error y propuesta), plantilla de pull request y `dependabot.yml` para las acciones.
 - [`.gitignore`](.gitignore) para el estado local que genera la herramienta y [`.gitattributes`](.gitattributes) para fijar CRLF en los `.ps1`.
 
+## [Sin publicar] — administrador siempre, MSI que compila
+
+### Anadido
+
+- **Auto-elevacion a Administrador** en las tres versiones de la v8 (`8.0`, `8.1`, `8.2`): nueva seccion 2b que comprueba los privilegios al arrancar y, si no los tiene, se relanza con UAC como Administrador conservando motor, argumentos y codigo de salida. Sin privilegios, el script deja de avisar «ejecuta como Administrador» y hace lo que puede hacer. Con `-noelevate` se desactiva (pruebas, auditoria, equipos sin UAC).
+- `versiones/8/Add-WiXToPath.ps1`: anade `C:\Program Files (x86)\WiX Toolset v3.11\bin` al PATH de Windows (`-Scope User` o `-Scope Machine`, `-SessionOnly` para no tocar el registro, `-Remove` para quitarlo).
+- `versiones/8/build-msi.ps1`: compila el MSI de una vez (candle + light), copia el script con el nombre que espera el `.wxs`, adapta la plantilla a la version pedida y comprueba el resultado.
+
+### Corregido
+
+- **El `.wxs` ya compila sin errores ICE.** `ICE80` (`This 32BitComponent ... uses 64BitDirectory INSTALLFOLDER`): el paquete es x64 (`Platform="x64"`) y los componentes son de 64 bits (`Win64="yes"`), ademas de `-arch x64` al compilar. `ICE64` (`The directory ProgramMenuDir is in the user profile but is not listed in the RemoveFile table`): el componente del acceso directo pasa a vivir dentro de `ProgramMenuDir` con `RemoveFolder` sobre esa misma carpeta y su clave de registro pasa de `HKCU` a `HKLM`, con lo que el acceso directo es por maquina. Las plantillas embebidas en los tres scripts y la del repositorio quedan iguales.
+- `New-WixInstallerPackage` (el generador de MSI del panel) ya no exige que WiX este en el PATH: localiza `candle.exe`/`light.exe` en las instalaciones habituales de WiX v3 y anade la carpeta al PATH de la sesion antes de compilar.
+
 ## [8.2 ULTIMATE] ⭐ actual
 
 📄 [`versiones/8/DefenderTray_8.2_Pro.ps1`](versiones/8/DefenderTray_8.2_Pro.ps1) · 4 939 líneas · 66 secciones · 142 funciones
