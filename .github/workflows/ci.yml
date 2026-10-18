@@ -25,7 +25,7 @@ jobs:
     name: Sintaxis de la versión soportada
     runs-on: windows-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Parsear los .ps1 de la versión actual (bloqueante)
         shell: powershell
@@ -54,7 +54,7 @@ jobs:
     runs-on: windows-latest
     continue-on-error: true
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Parsear el resto de versiones sin fallar el build
         shell: powershell
@@ -75,7 +75,7 @@ jobs:
     name: Codificación y finales de línea
     runs-on: windows-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Sin BOM, CRLF en los .ps1 y literales ASCII
         shell: powershell
@@ -110,7 +110,7 @@ jobs:
     runs-on: windows-latest
     continue-on-error: true
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Analizar la versión actual
         shell: powershell
@@ -127,7 +127,7 @@ jobs:
     name: Enlaces y anclas de la documentación
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - uses: actions/setup-python@v5
         with:
