@@ -8,10 +8,10 @@
 
 🌐 **Español** · [English](#english)
 
-[![Versión](https://img.shields.io/badge/versi%C3%B3n-8.2%20ULTIMATE-4f46e5?style=flat-square)](versiones/8/DefenderTray_8.2_Pro.ps1)
+[![Versión](https://img.shields.io/badge/versi%C3%B3n-8.4.0%20ULTIMATE-4f46e5?style=flat-square)](versiones/8/DefenderTray_8.4_Pro.ps1)
 [![PowerShell](https://img.shields.io/badge/PowerShell-5.1%2B-012456?style=flat-square&logo=powershell&logoColor=white)](#-requisitos)
 [![Plataforma](https://img.shields.io/badge/Windows-10%20%C2%B7%2011%20%C2%B7%20Server-0078D4?style=flat-square&logo=windows&logoColor=white)](#-requisitos)
-[![Un solo archivo](https://img.shields.io/badge/un%20solo%20archivo-4777%20l%C3%ADneas-059669?style=flat-square)](versiones/8/DefenderTray_8.2_Pro.ps1)
+[![Un solo archivo](https://img.shields.io/badge/un%20solo%20archivo-5612%20l%C3%ADneas-059669?style=flat-square)](versiones/8/DefenderTray_8.4_Pro.ps1)
 [![API local](https://img.shields.io/badge/API%20local-REST%20%C2%B7%20GraphQL%20%C2%B7%20SSE%20%C2%B7%20PWA-1e1b4b?style=flat-square)](#-api-local)
 [![Licencia](https://img.shields.io/badge/licencia-propietaria-475569?style=flat-square)](LICENSE)
 [![Seguridad](https://img.shields.io/badge/seguridad-pol%C3%ADtica%20publicada-FF3366?style=flat-square)](SECURITY.md)
@@ -32,7 +32,7 @@
 
 El control **Activar / Desactivar** cambia la protección en tiempo real, **sin detener el motor, matar el actualizador ni borrar bases de firmas**. Windows puede reactivar automáticamente una pausa. El resultado se verifica con el proveedor de Defender; si está bloqueado o no se puede consultar, se informa sin inventar un éxito.
 
-> **Corrección de firmas en 8.2:** los botones vuelven a estar uno junto al otro. ACTIVO deshabilita Activar y permite Desactivar; una pausa hace lo contrario. Si aparece `0.0.0.0`, pulsa **Activar** y después **Reparar Firmas** para intentar descargar la inteligencia desde tu fuente configurada, sin borrar la base existente. Esta modificación del código no repara automáticamente tu equipo. Consulta las [pruebas y pasos de recuperación](tests/README.md).
+> **Novedades en v8.4.0:** el botón **Cerrar** de *Event Log* ya cierra el diálogo (también con **Esc**), **Desactivar** apaga por completo tiempo real + protección en la nube (BAFS/MAPS) + envío automático de muestras, y **Activar** lo reactiva todo; el repo por defecto pasó a `yhquintero/DefenderTray` y *Buscar Actualización* migrará tu config sola. **No se tocan** servicios, controladores, exclusiones, rutas WSUS ni las bases de firmas (`.vdm`). Si aparece `0.0.0.0` en firmas, pulsa **Activar** y después **Reparar Firmas** para descargar inteligencia desde tu fuente sin borrar la existente. Esta modificación del código no repara automáticamente tu equipo; consulta las [pruebas y pasos de recuperación](tests/README.md).
 
 A partir de la rama 8.x el proyecto dejó de ser un simple *toggle* y añade una capa de **operaciones**: API REST/GraphQL local, panel web en tiempo real (SSE), PWA instalable, firma de reportes, exportación a Excel/CSV y PDF, alertas por Telegram, Firebase, SMTP y webhooks, modo auditoría, modo forense, agente residente por WMI y detección de anomalías.
 
@@ -79,20 +79,20 @@ A partir de la rama 8.x el proyecto dejó de ser un simple *toggle* y añade una
 
 ## 🚀 Inicio rápido
 
-Copia [`DefenderTray_8.2_Pro.ps1`](versiones/8/DefenderTray_8.2_Pro.ps1) a una carpeta dedicada y con permisos cerrados (`C:\DefenderTray` es la opción razonable): si lo dejas en *Escritorio* o *Descargas*, quien pueda escribir sobre ese archivo puede acabar ejecutándolo como `SYSTEM` si además usas el programador — ver [SECURITY.md](SECURITY.md#-límites-conocidos-y-mitigaciones) (L-2 y L-4):
+Copia [`DefenderTray_8.3_Pro.ps1`](versiones/8/DefenderTray_8.3_Pro.ps1) a una carpeta dedicada y con permisos cerrados (`C:\DefenderTray` es la opción razonable): si lo dejas en *Escritorio* o *Descargas*, quien pueda escribir sobre ese archivo puede acabar ejecutándolo como `SYSTEM` si además usas el programador — ver [SECURITY.md](SECURITY.md#-límites-conocidos-y-mitigaciones) (L-2 y L-4):
 
 ```powershell
 # 0) Comprueba que el archivo es el que esperas
-Get-FileHash .\DefenderTray_8.2_Pro.ps1 -Algorithm SHA256
+Get-FileHash .\DefenderTray_8.3_Pro.ps1 -Algorithm SHA256
 
 # 1) Abre PowerShell como Administrador y mira qué haría, sin tocar nada
-powershell -NoProfile -ExecutionPolicy Bypass -File .\DefenderTray_8.2_Pro.ps1 -audit
+powershell -NoProfile -ExecutionPolicy Bypass -File .\DefenderTray_8.3_Pro.ps1 -audit
 
 # 2) Panel interactivo (icono en la bandeja + ventana de control)
-powershell -NoProfile -ExecutionPolicy Bypass -File .\DefenderTray_8.2_Pro.ps1
+powershell -NoProfile -ExecutionPolicy Bypass -File .\DefenderTray_8.3_Pro.ps1
 
 # 3) Modo sin consola, para tareas programadas o despliegue por GPO
-powershell -NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File .\DefenderTray_8.2_Pro.ps1 -silent -norest
+powershell -NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File .\DefenderTray_8.3_Pro.ps1 -silent -norest
 ```
 
 **Antes de desactivar en Windows 11:** la *Protección frente a manipulaciones* o las políticas de una organización pueden impedir el cambio. DefenderTray no fuerza el cierre de procesos ni cambia Tamper Protection por registro: informa del bloqueo. No modifiques políticas corporativas sin autorización. Una instalación afectada por versiones antiguas puede requerir recuperación selectiva y reinicio antes de recuperar el estado normal.
@@ -100,7 +100,7 @@ powershell -NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File .\Defend
 Para arrancarlo con doble clic, crea un acceso directo con este destino:
 
 ```text
-C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File "C:\DefenderTray\DefenderTray_8.2_Pro.ps1" -silent
+C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File "C:\DefenderTray\DefenderTray_8.3_Pro.ps1" -silent
 ```
 
 > [!TIP]
@@ -134,7 +134,7 @@ Abre una consola nueva despues: el PATH guardado por Windows solo se lee al arra
 **2) Compilar el MSI:**
 
 ```powershell
-.\versiones\8\build-msi.ps1                # v8.2 -> %USERPROFILE%\Desktop\DefenderTray_v8.2_MSI
+.\versiones\8\build-msi.ps1                # v8.4.0 -> %USERPROFILE%\Desktop\DefenderTray_v8.2_MSI
 .\versiones\8\build-msi.ps1 -Version 8.1   # otra version
 ```
 
@@ -143,7 +143,7 @@ O a mano, con los mismos interruptores que usa el script:
 ```powershell
 cd C:\Users\usuario\Desktop\DefenderTray_v8_MSI
 candle.exe -nologo -arch x64 -ext WixUIExtension DefenderTray.wxs
-light.exe  -nologo -ext WixUIExtension -o DefenderTray_v8.2.msi DefenderTray.wixobj
+light.exe  -nologo -ext WixUIExtension -o DefenderTray_v8.4.0.msi DefenderTray.wixobj
 ```
 
 **Errores ICE que ya no salen** (y por que):
@@ -249,7 +249,9 @@ El código vive en [`versiones/`](versiones/), una carpeta por hito. Esta es la 
 
 | Versión | Archivo | Qué aportó |
 |---|---|---|
-| **8.2 ULTIMATE** ⭐ | [`versiones/8/DefenderTray_8.2_Pro.ps1`](versiones/8/DefenderTray_8.2_Pro.ps1) | Actual **y recomendada**. Botones **Activar / Desactivar** adyacentes y según estado real; pausa de tiempo real conservando motor y firmas, recuperación selectiva de bloqueos antiguos y actualización no destructiva de inteligencia. Hereda todo lo de la 8.1. |
+| **8.4.0 ULTIMATE** ⭐ | [`versiones/8/DefenderTray_8.3_Pro.ps1`](versiones/8/DefenderTray_8.3_Pro.ps1) | Recomendada. Sobre la 8.3 añade: atajos **Alt+letra**, Enter/Esc en todos los diálogos, **Backup offline de firmas** (.vdm), verificación de **firma Authenticode** de motor/drivers en Diagnóstico, log detallado de cada preferencia rechazada, toasts distintos para cambios **PARCIALES**, y **modo de toggle** configurable en Ajustes (Full = RTP+Nube+Muestras / Solo RTP = compat. v8.2). Sigue sin tocar servicios, controladores, exclusiones WSUS ni bases de firmas. |
+| 8.3 ULTIMATE | — | Fix botón **Cerrar** de Event Log; Esc en diálogos; desactivación COMPLETA nube+muestras+RTP; repo por defecto `yhquintero/DefenderTray`; toggle rápido por splatting individual. Integrada en 8.4.0. |
+| 8.2 ULTIMATE | [`versiones/8/DefenderTray_8.2_Pro.ps1`](versiones/8/DefenderTray_8.2_Pro.ps1) | Botones **Activar / Desactivar** adyacentes y según estado real; fix crítico de `Set-MpPreference` por splatting; pausa de tiempo real conservando motor y firmas, recuperación selectiva de bloqueos antiguos y actualización no destructiva de inteligencia. |
 | 8.1 ULTIMATE | [`versiones/8/DefenderTray_8.1_Pro.ps1`](versiones/8/DefenderTray_8.1_Pro.ps1) | SQLite cifrado, firma Authenticode + guía EV, MSI con WiX, FCM v1, consola Fleet, anomalías por Z-score, Active Directory, GraphQL, PWA, kiosco biométrico, webhooks, Excel/CSV, panel SSE, autoactualización con SHA256 y empaquetado Docker. *Nota honesta:* v8.1 es **el mismo código que v8.0** con las cadenas de versión actualizadas (142 líneas, todas de texto). |
 | 8.0 ULTIMATE | [`versiones/8/DefenderTray_8.0_Pro.ps1`](versiones/8/DefenderTray_8.0_Pro.ps1) | Salto a «Enterprise Security Control»: las 15 funciones anteriores. |
 | 7.0 ULTIMATE | [`versiones/7/DefenderTray_7.0_Pro.ps1`](versiones/7/DefenderTray_7.0_Pro.ps1) | Panel web servido por la API, perfiles, Telegram, auto-reparación heurística, voz, PDF firmado, botón de pánico, Event Log, nube, multi-monitor, tema editable, tutela, modo forense. |
@@ -440,9 +442,9 @@ El repositorio es público y el código legible, pero eso no concede derechos de
 **Quick start.**
 
 ```powershell
-Get-FileHash .\DefenderTray_8.2_Pro.ps1 -Algorithm SHA256                      # verify what you downloaded
-powershell -NoProfile -ExecutionPolicy Bypass -File .\DefenderTray_8.2_Pro.ps1 -audit    # read-only dry run
-powershell -NoProfile -ExecutionPolicy Bypass -File .\DefenderTray_8.2_Pro.ps1           # interactive panel
+Get-FileHash .\DefenderTray_8.3_Pro.ps1 -Algorithm SHA256                      # verify what you downloaded
+powershell -NoProfile -ExecutionPolicy Bypass -File .\DefenderTray_8.3_Pro.ps1 -audit    # read-only dry run
+powershell -NoProfile -ExecutionPolicy Bypass -File .\DefenderTray_8.3_Pro.ps1           # interactive panel
 ```
 
 On Windows 11, Tamper Protection or managed policies may reject a change. The corrected v8.2 pauses real-time protection only, leaves the engine and updater running, and never deletes definitions when updating signatures. Enable/Disable buttons are side by side and follow the confirmed provider state. Legacy service blocks may need recovery and a reboot. See the [safe test and recovery protocol](tests/README.md).
